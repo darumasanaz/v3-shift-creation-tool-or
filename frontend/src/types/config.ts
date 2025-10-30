@@ -5,9 +5,15 @@ export type Person = {
   id: string;
   canWork: ShiftCode[];
   fixedOffWeekdays: WeekdayJ[];
+  weeklyMin?: number;
   weeklyMax?: number;
+  monthlyMin?: number;
   monthlyMax?: number;
   consecMax?: number;
+};
+
+export type WishOffs = {
+  [staffId: string]: number[];
 };
 
 export type NightRestSetting = {

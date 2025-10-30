@@ -38,14 +38,26 @@ Vite + React + TypeScript + Tailwind CSS 構成で、シフト条件の作成と
 ### Config ページ（条件フォーム）
 `/config` でシフト条件を入力し、solver 用の `input.json` を生成できます。
 
-- スタッフの勤務可否・固定休・上限・最大連勤をテーブル形式で編集
-- ルール（noEarlyAfterDayAB / 夜勤明け休息日数）の編集
+- 勤務可シフト・固定休はチェックボックスで選択し、選択済みはチップ表示＆ワンクリックで解除可能
+- 週／月の「下限 / 上限」を同じ行で入力（空欄は 0 として扱い、無制限や下限なしに相当）
+- 最大連勤・ルール（noEarlyAfterDayAB / 夜勤明け休息日数）の編集
 - ローカル保存（localStorage）、保存データの読み込み
 - サンプル読込（`solver/sample_input_real.json` をベースにフォームへ反映）
-- JSON ダウンロード（入力した people / rules を差し込んだ `input.json`）
+- JSON ダウンロード（入力した people / rules / wishOffs を差し込んだ `input.json`）
 
 ### Viewer ページ（出力JSONビューア）
 OR-Tools の結果ファイル `solver/output.json` をローカルで読み込み、日付×スタッフのシフト表として確認できます。
+
+- summary カードでは不足・過剰に加えて希望休違反（wishOffViolations）を表示
+
+### WishOffs ページ（希望休管理）
+`/wish-offs` で 2025 年 12 月のカレンダーを表示し、スタッフごとの希望休（wish offs）を登録できます。
+
+- Config ページで保存したスタッフ一覧から対象を選択（プルダウン／サイドリスト）
+- カレンダーをクリックして希望休 ON/OFF を切り替え、選択済みはチップで一覧表示
+- ローカル保存キー: `shift-wishoffs-2025-12`
+- JSON ダウンロードで現在の希望休データを保存（`wishOffs` は Config の JSON ダウンロードにも自動で含まれます）
+- 現時点では 2025/12 固定（将来拡張予定）
 
 ### 起動手順
 ```bash
@@ -54,7 +66,7 @@ npm install
 npm run dev
 ```
 
-その後、ブラウザで [http://localhost:5173](http://localhost:5173) を開き、上部ナビゲーションから Viewer / Config を切り替えられます。
+その後、ブラウザで [http://localhost:5173](http://localhost:5173) を開き、上部ナビゲーションから Viewer / Config / WishOffs を切り替えられます。
 Viewer ページでは `solver/output.json` をドラッグ＆ドロップするか「JSONを読み込み」ボタンから選択してください。
 Config ページでは条件を入力して「JSONダウンロード」で solver 入力を取得できます。
 
@@ -63,6 +75,10 @@ Config ページでは条件を入力して「JSONダウンロード」で solve
    ```bash
    source .venv/bin/activate
    python solver/solver.py --in solver/sample_input_real.json --out solver/output.json --time_limit 30
+   ```
+   週／月下限・希望休を含むテストケースは `solver/sample_input_rules_min.json` を利用できます。
+   ```bash
+   python solver/solver.py --in solver/sample_input_rules_min.json --out solver/output.json --time_limit 60
    ```
 2. フロントエンドから参照できる場所へコピーします。
    ```bash
@@ -76,9 +92,15 @@ Config ページでは条件を入力して「JSONダウンロード」で solve
 
 ### 主な機能
 - 固定ヘッダ付きのシフト表（横スクロール対応）
-- `summary.totals` の不足 / 過剰 / 希望休違反をカード表示
+- `summary.totals` の不足 / 過剰 / 希望休違反 (wishOffViolations) をカード表示
 - 夜勤シフト（NA / NB / NC）の淡色ハイライト
 - CSV ダウンロード（1 行目にヘッダ、UTF-8）
 - ドラッグ＆ドロップによる JSON 読み込み
 
 ※ フロントエンドは静的ビルドが可能な Vite + React + TypeScript + Tailwind CSS 構成です。
+
+### solver の新しい重みと制約
+- `weeklyMin` / `monthlyMin` を people に指定すると、各週・月の割当下限がハード制約として適用されます（0 または未指定は制約なし）。
+- `wishOffs` は `{スタッフID: [日番号]}` 形式で指定でき、割当時に `w_wish_off_violation` で重み付けしたペナルティが追加されます（未設定時は既定値 20）。
+- 既存の `W_requested_off_violation` も引き続きサポートされ、`wishOffs` と併用できます。
+- infeasible な場合は `summary.diagnostics` に週／月下限の不足や希望休との衝突状況が出力されます。

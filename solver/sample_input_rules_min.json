@@ -1,0 +1,77 @@
+{
+  "year": 2025,
+  "month": 12,
+  "days": 7,
+  "weekdayOfDay1": 1,
+  "previousMonthNightCarry": {"NA": [], "NB": [], "NC": []},
+  "shifts": [
+    {"code": "EA", "name": "早番", "start": 7, "end": 16},
+    {"code": "DA", "name": "日勤A", "start": 9, "end": 18},
+    {"code": "NB", "name": "夜勤B", "start": 18, "end": 33},
+    {"code": "NC", "name": "夜勤C", "start": 21, "end": 31}
+  ],
+  "needTemplate": {
+    "normal": {"7-9": 1, "9-15": 2, "16-18": 1, "18-24": 2, "0-7": 2},
+    "low":    {"7-9": 1, "9-15": 1, "16-18": 1, "18-24": 2, "0-7": 2}
+  },
+  "dayTypeByDate": ["normal", "normal", "low", "normal", "normal", "low", "normal"],
+  "strictNight": {"21-23": 2, "0-7": 2, "18-21_min": 2, "18-21_max": 3},
+  "people": [
+    {
+      "id": "佐藤",
+      "canWork": ["EA", "DA"],
+      "fixedOffWeekdays": ["日"],
+      "weeklyMin": 3,
+      "weeklyMax": 5,
+      "monthlyMin": 6,
+      "monthlyMax": 18,
+      "consecMax": 4
+    },
+    {
+      "id": "鈴木",
+      "canWork": ["EA", "DA", "NB"],
+      "fixedOffWeekdays": [],
+      "weeklyMin": 2,
+      "weeklyMax": 5,
+      "monthlyMin": 6,
+      "monthlyMax": 20,
+      "consecMax": 5
+    },
+    {
+      "id": "高橋",
+      "canWork": ["DA", "NB", "NC"],
+      "fixedOffWeekdays": ["水"],
+      "weeklyMin": 2,
+      "weeklyMax": 4,
+      "monthlyMin": 5,
+      "monthlyMax": 16,
+      "consecMax": 4
+    },
+    {
+      "id": "田中",
+      "canWork": ["EA", "DA", "NC"],
+      "fixedOffWeekdays": ["土"],
+      "weeklyMin": 2,
+      "weeklyMax": 5,
+      "monthlyMin": 6,
+      "monthlyMax": 18,
+      "consecMax": 5
+    }
+  ],
+  "rules": {
+    "noEarlyAfterDayAB": false,
+    "nightRest": {"NA": 2, "NB": 1, "NC": 1}
+  },
+  "wishOffs": {
+    "佐藤": [2, 5],
+    "鈴木": [3],
+    "田中": [6]
+  },
+  "weights": {
+    "W_shortage": 1000,
+    "W_overstaff_gt_need_plus1": 5,
+    "W_prefer_fill_morning7_9": 10,
+    "W_fill_9_15": 3,
+    "w_wish_off_violation": 20
+  }
+}
