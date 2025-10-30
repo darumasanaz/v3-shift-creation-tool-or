@@ -38,6 +38,93 @@ const SUMMARY_CARDS: SummaryCard[] = [
   { key: 'wishOffViolations', label: '希望休違反' },
 ];
 
+type OutputDetection = {
+  kind: 'output';
+  matched: string[];
+  missing: string[];
+};
+
+type InputDetection = {
+  kind: 'input';
+  matched: string[];
+  missing: string[];
+  forbidden: string[];
+  absentOutputKeys: string[];
+};
+
+type UnknownDetection = {
+  kind: 'unknown';
+  output: { matched: string[]; missing: string[] };
+  input: { matched: string[]; missing: string[] };
+};
+
+type DetectionResult = OutputDetection | InputDetection | UnknownDetection;
+
+const OUTPUT_REQUIRED_KEYS: Record<string, (value: unknown) => boolean> = {
+  peopleOrder: Array.isArray,
+  matrix: Array.isArray,
+};
+
+const INPUT_REQUIRED_KEYS: Record<string, (value: unknown) => boolean> = {
+  people: Array.isArray,
+  shifts: Array.isArray,
+};
+
+const INPUT_FORBIDDEN_KEYS = ['assignments', 'matrix', 'peopleOrder'];
+const OUTPUT_KEY_HINTS = ['assignments'];
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+function analyseKeys(
+  record: Record<string, unknown>,
+  schema: Record<string, (value: unknown) => boolean>,
+): { matched: string[]; missing: string[] } {
+  const matched: string[] = [];
+  const missing: string[] = [];
+  Object.entries(schema).forEach(([key, validator]) => {
+    if (validator(record[key])) {
+      matched.push(key);
+    } else {
+      missing.push(key);
+    }
+  });
+  return { matched, missing };
+}
+
+function detectScheduleJson(value: unknown): DetectionResult {
+  if (!isRecord(value)) {
+    return {
+      kind: 'unknown',
+      output: { matched: [], missing: Object.keys(OUTPUT_REQUIRED_KEYS) },
+      input: { matched: [], missing: Object.keys(INPUT_REQUIRED_KEYS) },
+    };
+  }
+
+  const outputCheck = analyseKeys(value, OUTPUT_REQUIRED_KEYS);
+  if (outputCheck.missing.length === 0) {
+    return { kind: 'output', ...outputCheck };
+  }
+
+  const inputCheck = analyseKeys(value, INPUT_REQUIRED_KEYS);
+  const forbidden = INPUT_FORBIDDEN_KEYS.filter((key) => key in value);
+  if (inputCheck.missing.length === 0 && forbidden.length === 0) {
+    const absentOutputKeys = OUTPUT_KEY_HINTS.filter((key) => !(key in value));
+    return {
+      kind: 'input',
+      ...inputCheck,
+      forbidden,
+      absentOutputKeys,
+    };
+  }
+
+  return {
+    kind: 'unknown',
+    output: outputCheck,
+    input: inputCheck,
+  };
+}
+
 function formatDate(value: MatrixEntry['date']): string {
   if (typeof value === 'number') {
     // Interpret large timestamps as dates and smaller numbers as ordinal days.
@@ -89,8 +176,85 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 export default function ViewerPage() {
   const [schedule, setSchedule] = useState<ScheduleData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isSolving, setIsSolving] = useState(false);
+  const [pendingInput, setPendingInput] = useState<Record<string, unknown> | null>(null);
+  const [inputAnalysis, setInputAnalysis] = useState<InputDetection | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const formatKeyList = (keys: string[]): string => keys.join('、');
+
+  const buildInputSummary = (analysis: InputDetection) => {
+    const parts: string[] = [];
+    if (analysis.matched.length > 0) {
+      parts.push(`${formatKeyList(analysis.matched)} があり`);
+    }
+    if (analysis.absentOutputKeys.length > 0) {
+      parts.push(`${formatKeyList(analysis.absentOutputKeys)} がありません`);
+    }
+    if (analysis.forbidden.length > 0) {
+      parts.push(`${formatKeyList(analysis.forbidden)} が含まれていません`);
+    }
+    const reason = parts.length > 0 ? parts.join('、') : '入力用のキー構成です。';
+    return `入力JSONと判定しました（判定根拠: ${reason}）。`;
+  };
+
+  const buildInputGuidance = (analysis: InputDetection) =>
+    [
+      'このファイルは solver の入力JSONのようです。Viewer は出力JSON（output.json）を表示します。',
+      '開発モードでは「この入力で実行」ボタンで solver を実行し、結果を表示できます。',
+      buildInputSummary(analysis),
+    ].join('\n');
+
+  const buildUnknownMessage = (analysis: UnknownDetection) => {
+    const lines = ['JSONの形式を判定できませんでした。'];
+    if (analysis.output.missing.length > 0) {
+      lines.push(`出力JSONに必要なキー: ${formatKeyList(analysis.output.missing)} が見つかりません。`);
+    }
+    if (analysis.input.missing.length > 0) {
+      lines.push(`入力JSONに必要なキー: ${formatKeyList(analysis.input.missing)} が見つかりません。`);
+    }
+    if (analysis.output.matched.length > 0) {
+      lines.push(`出力JSONの候補キー: ${formatKeyList(analysis.output.matched)} は見つかりました。`);
+    }
+    if (analysis.input.matched.length > 0) {
+      lines.push(`入力JSONの候補キー: ${formatKeyList(analysis.input.matched)} は見つかりました。`);
+    }
+    return lines.join('\n');
+  };
+
+  const runSolver = async (input: Record<string, unknown>, analysis: InputDetection) => {
+    setIsSolving(true);
+    setError(null);
+    setNotice(`${buildInputSummary(analysis)} solverを実行しています…`);
+    try {
+      const res = await fetch('/api/solve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text}`);
+      }
+      const solved = await res.json();
+      const detection = detectScheduleJson(solved);
+      if (detection.kind !== 'output') {
+        throw new Error('Solver result did not match the expected output schema.');
+      }
+      setSchedule(solved as ScheduleData);
+      setError(null);
+      setNotice(`${buildInputSummary(analysis)} solverの実行が完了しました。`);
+    } catch (solverError) {
+      console.error(solverError);
+      setSchedule(null);
+      setError('solverの実行に失敗しました。開発サーバーのログを確認してください。');
+      setNotice(buildInputSummary(analysis));
+    } finally {
+      setIsSolving(false);
+    }
+  };
 
   const loadSample = async () => {
     try {
@@ -104,6 +268,9 @@ export default function ViewerPage() {
       }
       setSchedule(json);
       setError(null);
+      setNotice(null);
+      setPendingInput(null);
+      setInputAnalysis(null);
       alert('読み込み完了');
     } catch (e) {
       console.error(e);
@@ -121,21 +288,46 @@ export default function ViewerPage() {
         if (typeof text !== 'string') {
           throw new Error('ファイルを読み込めませんでした');
         }
-        const parsed = JSON.parse(text) as ScheduleData;
-        if (!Array.isArray(parsed.peopleOrder) || !Array.isArray(parsed.matrix)) {
-          throw new Error('想定した形式のJSONではありません');
+        const parsed = JSON.parse(text) as unknown;
+        const detection = detectScheduleJson(parsed);
+        if (detection.kind === 'output') {
+          setSchedule(parsed as ScheduleData);
+          setError(null);
+          setNotice(null);
+          setPendingInput(null);
+          setInputAnalysis(null);
+        } else if (detection.kind === 'input') {
+          setSchedule(null);
+          setPendingInput(parsed as Record<string, unknown>);
+          setInputAnalysis(detection);
+          if (import.meta.env.DEV) {
+            void runSolver(parsed as Record<string, unknown>, detection);
+          } else {
+            setError(buildInputGuidance(detection));
+            setNotice(null);
+          }
+        } else {
+          setSchedule(null);
+          setError(buildUnknownMessage(detection));
+          setNotice(null);
+          setPendingInput(null);
+          setInputAnalysis(null);
         }
-        setSchedule(parsed);
-        setError(null);
       } catch (e) {
         console.error(e);
         setSchedule(null);
-        setError('JSONの解析に失敗しました。ファイル形式を確認してください。');
+        setError('JSONの解析に失敗しました。ファイル形式やエンコーディングを確認してください。詳細はコンソールを参照してください。');
+        setNotice(null);
+        setPendingInput(null);
+        setInputAnalysis(null);
       }
     };
     reader.onerror = () => {
       setError('ファイルの読み込み中にエラーが発生しました。');
       setSchedule(null);
+      setNotice(null);
+      setPendingInput(null);
+      setInputAnalysis(null);
     };
     reader.readAsText(file, 'utf-8');
   };
@@ -258,16 +450,41 @@ export default function ViewerPage() {
           aria-label="JSONファイルのドラッグアンドドロップ領域"
           tabIndex={0}
         >
-          <p className="text-lg font-medium text-slate-800">ここに output.json をドロップ</p>
-          <p className="text-sm text-slate-500">または上のボタンからファイルを選択してください</p>
+          <p className="text-lg font-medium text-slate-800">ここに JSON ファイルをドロップ</p>
+          <p className="text-sm text-slate-500">output.json はそのまま表示され、input.json は開発モードで solver を実行できます</p>
         </section>
+
+        {notice && (
+          <div
+            className="rounded-md border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800"
+            role="status"
+          >
+            {notice}
+          </div>
+        )}
 
         {error && (
           <div
-            className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 whitespace-pre-line"
             role="alert"
           >
             {error}
+          </div>
+        )}
+
+        {import.meta.env.DEV && pendingInput && inputAnalysis && (
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => pendingInput && inputAnalysis && void runSolver(pendingInput, inputAnalysis)}
+              disabled={isSolving}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-400"
+            >
+              {isSolving ? 'solver 実行中…' : 'この入力で実行'}
+            </button>
+            <p className="text-sm text-slate-500">
+              Python solver を呼び出して output.json 相当の結果を表示します。
+            </p>
           </div>
         )}
 
