@@ -1,7 +1,7 @@
 # shift-creation-v3-or
 
-OR-Tools (CP-SAT) を使ったシフト作成の最適化コア（v3）。  
-最小構成：/solver に CP-SAT モデル、/frontend は既存UIや連携の置き場。
+OR-Tools (CP-SAT) を使ったシフト作成の最適化コア（v3）。
+最小構成：`/solver` に CP-SAT モデル、`/frontend` は既存 UI や連携の置き場。
 
 ## Quick Start
 ```bash
@@ -10,14 +10,25 @@ python -m venv .venv
 . ./.venv/Scripts/Activate.ps1
 pip install -r solver/requirements.txt
 python solver/solver.py --in solver/sample_input.json --out solver/output.json
+```
 
+## Frontend (出力JSONビューア)
+OR-Tools の結果ファイル `solver/output.json` をローカルで読み込み、日付×スタッフのシフト表として確認できます。
 
-## 4-2) `solver/model_schema.md`
+### 起動手順
 ```bash
-cat > solver/model_schema.md << 'EOF'
-# 入出力スキーマ（概要）
+cd frontend
+npm install
+npm run dev
+```
 
-- 入力: `year, month, days, weekdayOfDay1, previousMonthNightCarry, shifts[], needTemplate, dayTypeByDate[], strictNight, people[], rules{}, weights{}`
-- 出力: `assignments[]`, `summary.shortage[]`, `summary.overstaff[]`, `infeasible?`
+その後、ブラウザで [http://localhost:5173](http://localhost:5173) を開き、`solver/output.json` をドラッグ＆ドロップするか「JSONを読み込み」ボタンから選択してください。
 
-※ 詳細はコード内コメントも参照。
+### 主な機能
+- 固定ヘッダ付きのシフト表（横スクロール対応）
+- `summary.totals` の不足 / 過剰 / 希望休違反をカード表示
+- 夜勤シフト（NA / NB / NC）の淡色ハイライト
+- CSV ダウンロード（1 行目にヘッダ、UTF-8）
+- ドラッグ＆ドロップによる JSON 読み込み
+
+※ フロントエンドは静的ビルドが可能な Vite + React + TypeScript + Tailwind CSS 構成です。
