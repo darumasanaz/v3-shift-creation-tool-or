@@ -1,0 +1,31 @@
+{
+  "year": 2025, "month": 11, "days": 2, "weekdayOfDay1": 0,
+  "previousMonthNightCarry": {"NA": [], "NB": [], "NC": []},
+  "shifts": [
+    {"code":"EA","name":"早番","start":7,"end":16},
+    {"code":"DA","name":"日勤A","start":9,"end":18},
+    {"code":"LA","name":"遅番","start":15,"end":21},
+    {"code":"NB","name":"夜勤B","start":18,"end":33},
+    {"code":"NC","name":"夜勤C","start":21,"end":31}
+  ],
+  "needTemplate": {
+    "bathDay":   {"7-9":0, "9-15":0, "16-18":0, "18-24":2, "0-7":2},
+    "normalDay": {"7-9":0, "9-15":0, "16-18":0, "18-24":2, "0-7":2},
+    "wednesday": {"7-9":0, "9-15":0, "16-18":0, "18-24":2, "0-7":2}
+  },
+  "dayTypeByDate": ["bathDay","bathDay"],
+  "strictNight": { "21-23":2, "0-7":2, "18-21_min":2, "18-21_max":3 },
+  "people": [
+    {"id":"s1","canWork":["EA","DA","LA","NB","NC"],"fixedOffWeekdays":[],"weeklyMax":6,"monthlyMax":31,"consecMax":5},
+    {"id":"s2","canWork":["EA","DA","LA","NB","NC"],"fixedOffWeekdays":[],"weeklyMax":6,"monthlyMax":31,"consecMax":5},
+    {"id":"s3","canWork":["EA","DA","LA","NB","NC"],"fixedOffWeekdays":[],"weeklyMax":6,"monthlyMax":31,"consecMax":5}
+  ],
+  "rules": { "noEarlyAfterDayAB": true, "nightRest": { "NA": 2, "NB": 0, "NC": 1 } },
+  "weights": {
+    "W_shortage": 1000,
+    "W_overstaff_gt_need_plus1": 5,
+    "W_balance_workdays": 1,
+    "W_prefer_fill_morning7_9": 10,
+    "W_fill_9_15": 3
+  }
+}
