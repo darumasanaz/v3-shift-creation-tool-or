@@ -1,0 +1,27 @@
+{
+  "year": 2025,
+  "month": 11,
+  "days": 1,
+  "weekdayOfDay1": 0,
+  "previousMonthNightCarry": {"NA": [], "NB": [], "NC": []},
+  "shifts": [
+    {"code": "NB", "name": "夜勤B", "start": 18, "end": 33},
+    {"code": "NC", "name": "夜勤C", "start": 21, "end": 31}
+  ],
+  "needTemplate": {
+    "bathDay": {"7-9": 0, "9-15": 0, "16-18": 0, "18-24": 2, "0-7": 2}
+  },
+  "dayTypeByDate": ["bathDay"],
+  "strictNight": {"21-23": 2, "0-7": 2, "18-21_min": 2, "18-21_max": 3},
+  "people": [
+    {"id": "p1", "canWork": ["NB"], "fixedOffWeekdays": [], "weeklyMax": 7, "monthlyMax": 31, "consecMax": 5}
+  ],
+  "rules": {"noEarlyAfterDayAB": true, "nightRest": {"NA": 2, "NB": 0, "NC": 1}},
+  "weights": {
+    "W_shortage": 1000,
+    "W_overstaff_gt_need_plus1": 5,
+    "W_balance_workdays": 1,
+    "W_prefer_fill_morning7_9": 10,
+    "W_fill_9_15": 3
+  }
+}

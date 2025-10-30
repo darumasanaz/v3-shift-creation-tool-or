@@ -1,16 +1,157 @@
 import json, argparse
 from ortools.sat.python import cp_model
 
-SLOTS = ["0-7","7-9","9-15","16-18","18-21","21-23"]
+SLOTS = ["0-7", "7-9", "9-15", "16-18", "18-21", "21-23"]
+SUMMARY_SLOTS = ["7-9", "9-15", "16-18", "18-21", "21-23", "0-7"]
+
 
 def overlap(start, end, a, b):
     return not (end <= a or b <= start)
 
-def slot_contributes(shift, slot_label):
+def parse_slot(slot_label):
     a, b = map(int, slot_label.split("-"))
-    return overlap(shift["start"], shift["end"], a, b)
+    if slot_label == "0-7":
+        a += 24
+    if b <= a:
+        b += 24
+    return a, b
 
-def solve(data):
+
+def slot_contributes(shift, slot_label):
+    a, b = parse_slot(slot_label)
+    shift_start, shift_end = shift["start"], shift["end"]
+    if shift_end <= shift_start and shift_end <= 24:
+        shift_end += 24
+    return overlap(shift_start, shift_end, a, b)
+
+
+def split_weeks(days, weekday0):
+    weeks = []
+    start = 1
+    for d in range(1, days + 1):
+        wd = (weekday0 + (d - 1)) % 7
+        if wd == 0 and d != 1:
+            weeks.append((start, d - 1))
+            start = d
+    weeks.append((start, days))
+    return weeks
+
+
+def compute_summary(data, assignments, s_values):
+    summary = {
+        "shortage": [],
+        "overstaff": [],
+        "totals": {"shortage": 0, "overstaff": 0},
+    }
+    _ = assignments  # assignments kept for future use / interface compatibility
+
+    def add_shortage(date, slot, lack):
+        summary["shortage"].append({"date": date, "slot": slot, "lack": int(lack)})
+        summary["totals"]["shortage"] += int(lack)
+
+    def add_overstaff(date, slot, excess):
+        summary["overstaff"].append({"date": date, "slot": slot, "excess": int(excess)})
+        summary["totals"]["overstaff"] += int(excess)
+
+    days = data["days"]
+    day_types = data["dayTypeByDate"]
+    need_template = data["needTemplate"]
+    carry = 0
+    if days >= 1:
+        carry = sum(
+            len(data["previousMonthNightCarry"].get(key, [])) for key in ("NA", "NB", "NC")
+        )
+
+    for d in range(1, days + 1):
+        if d == 1:
+            carry_today = carry
+        else:
+            carry_today = 0
+        day_type = day_types[d - 1]
+        needs = need_template[day_type]
+
+        for slot in ["7-9", "9-15", "16-18"]:
+            actual = s_values.get((d, slot), 0)
+            need = needs[slot]
+            lack = max(0, need - actual)
+            excess = max(0, actual - (need + 1))
+            if lack > 0:
+                add_shortage(d, slot, lack)
+            if excess > 0:
+                add_overstaff(d, slot, excess)
+
+        actual = s_values.get((d, "18-21"), 0)
+        lack = max(0, 2 - actual)
+        excess = max(0, actual - 3)
+        if lack > 0:
+            add_shortage(d, "18-21", lack)
+        if excess > 0:
+            add_overstaff(d, "18-21", excess)
+
+        actual = s_values.get((d, "21-23"), 0)
+        lack = max(0, 2 - actual)
+        excess = max(0, actual - 2)
+        if lack > 0:
+            add_shortage(d, "21-23", lack)
+        if excess > 0:
+            add_overstaff(d, "21-23", excess)
+
+        actual = s_values.get((d, "0-7"), 0)
+        actual_with_carry = actual + carry_today
+        lack = max(0, 2 - actual_with_carry)
+        excess = max(0, actual_with_carry - 2)
+        if lack > 0:
+            add_shortage(d, "0-7", lack)
+        if excess > 0:
+            add_overstaff(d, "0-7", excess)
+
+    return summary
+
+
+def estimate_slot_max_possible(data):
+    days = range(1, data["days"] + 1)
+    staff = data["people"]
+    shifts = data["shifts"]
+
+    fixed_map = {
+        "Sun": 0,
+        "Mon": 1,
+        "Tue": 2,
+        "Wed": 3,
+        "Thu": 4,
+        "Fri": 5,
+        "Sat": 6,
+        "日": 0,
+        "月": 1,
+        "火": 2,
+        "水": 3,
+        "木": 4,
+        "金": 5,
+        "土": 6,
+    }
+
+    def weekday_of(d):
+        return (data["weekdayOfDay1"] + (d - 1)) % 7
+
+    slot_capacity = {}
+    for d in days:
+        wd = weekday_of(d)
+        for slot in SUMMARY_SLOTS:
+            count = 0
+            for person in staff:
+                offs = set(fixed_map.get(w, w) for w in person.get("fixedOffWeekdays", []))
+                if wd in offs:
+                    continue
+                can = set(person.get("canWork", []))
+                possible = any(
+                    shift["code"] in can and slot_contributes(shift, slot) for shift in shifts
+                )
+                if possible:
+                    count += 1
+            slot_capacity[(d, slot)] = count
+    return slot_capacity
+
+def solve(data, time_limit=10.0):
     days = range(1, data["days"]+1)
     staff = data["people"]
     shifts = data["shifts"]
@@ -53,8 +194,15 @@ def solve(data):
             if wd in offs:
                 m.Add(sum(x[d,i,k] for k in K) == 0)
 
+    # 3b) 週上限
+    weeks = split_weeks(data["days"], data["weekdayOfDay1"])
+    for i, p in enumerate(staff):
+        wmax = p.get("weeklyMax", 0)
+        if wmax and wmax > 0:
+            for a, b in weeks:
+                m.Add(sum(work[d, i] for d in range(a, b + 1)) <= wmax)
+
     # 4) 夜勤明け休み
-    rest = data["rules"]["nightRest"]
     idxNA, idxNB, idxNC = code_index.get("NA"), code_index.get("NB"), code_index.get("NC")
     for d in days:
         for i in I:
@@ -133,11 +281,12 @@ def solve(data):
     m.Minimize(sum(penalties))
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 10.0
+    solver.parameters.max_time_in_seconds = time_limit
     res = solver.Solve(m)
 
-    out = {"assignments": [], "summary": {"shortage": [], "overstaff": []}}
+    out = {"assignments": []}
     if res in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        s_values = {(d, slot): solver.Value(s[d, slot]) for d in days for slot in SLOTS}
         for d in days:
             for i in I:
                 for k in K:
@@ -147,18 +296,55 @@ def solve(data):
                             "staffId": staff[i]["id"],
                             "shift": shifts[k]["code"]
                         })
+        out["summary"] = compute_summary(data, out["assignments"], s_values)
     else:
         out["infeasible"] = True
+        slot_caps = estimate_slot_max_possible(data)
+        diagnostics = []
+        carry = sum(
+            len(data["previousMonthNightCarry"].get(key, [])) for key in ("NA", "NB", "NC")
+        ) if data["days"] >= 1 else 0
+        for d in days:
+            day_type = data["dayTypeByDate"][d - 1]
+            needs = data["needTemplate"][day_type]
+            for slot in SUMMARY_SLOTS:
+                if slot in ("7-9", "9-15", "16-18"):
+                    need = needs[slot]
+                elif slot == "18-21":
+                    need = 2
+                elif slot == "21-23":
+                    need = 2
+                else:  # 0-7
+                    need = 2
+                    if d == 1:
+                        need = max(0, need - carry)
+
+                max_possible = slot_caps.get((d, slot), 0)
+                if max_possible < need:
+                    diagnostics.append({
+                        "date": d,
+                        "slot": slot,
+                        "need": int(need),
+                        "maxPossible": int(max_possible),
+                    })
+        if diagnostics:
+            for item in diagnostics:
+                print(
+                    f"[diagnostic] day {item['date']} slot {item['slot']}: need {item['need']} maxPossible {item['maxPossible']}"
+                )
+        out["diagnostics"] = {"unmetCandidates": diagnostics}
+        out.setdefault("summary", {"shortage": [], "overstaff": [], "totals": {"shortage": 0, "overstaff": 0}})
     return out
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="infile", required=True)
     ap.add_argument("--out", dest="outfile", required=True)
+    ap.add_argument("--time_limit", type=float, default=10.0)
     args = ap.parse_args()
 
     data = json.load(open(args.infile, "r", encoding="utf-8"))
-    result = solve(data)
+    result = solve(data, time_limit=args.time_limit)
     json.dump(result, open(args.outfile, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
     print(f"wrote {args.outfile}")
 
