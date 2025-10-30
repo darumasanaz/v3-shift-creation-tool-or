@@ -1,8 +1,29 @@
 import json, argparse
+from dataclasses import dataclass
+from typing import Dict, List, Any
 from ortools.sat.python import cp_model
 
 SLOTS = ["0-7", "7-9", "9-15", "16-18", "18-21", "21-23"]
 SUMMARY_SLOTS = ["7-9", "9-15", "16-18", "18-21", "21-23", "0-7"]
+
+NEED_TEMPLATE_SLOTS = ["7-9", "9-15", "16-18", "18-24", "0-7"]
+
+
+class InputValidationError(Exception):
+    def __init__(self, message, code="invalid_input", details=None):
+        super().__init__(message)
+        self.message = message
+        self.code = code
+        self.details = details or {}
+
+
+@dataclass
+class PreparedDemand:
+    days: int
+    weekday0: int
+    day_types: List[str]
+    need_template: Dict[str, Dict[str, int]]
+    diagnostics: Dict[str, Any]
 
 
 def sanitize_day_set(values, day_limit=None):
@@ -47,6 +68,254 @@ def get_weight(weights, keys, default):
 
 def overlap(start, end, a, b):
     return not (end <= a or b <= start)
+
+
+def _as_non_negative_int(value, *, default=0):
+    try:
+        ivalue = int(value)
+    except (TypeError, ValueError):
+        return default
+    if ivalue < 0:
+        return default
+    return ivalue
+
+
+def _ensure_previous_month_carry(data):
+    raw = data.get("previousMonthNightCarry")
+    if not isinstance(raw, dict):
+        raw = {}
+    sanitized = {}
+    for key in ("NA", "NB", "NC"):
+        values = raw.get(key, [])
+        if isinstance(values, list):
+            sanitized[key] = values
+        else:
+            sanitized[key] = []
+    data["previousMonthNightCarry"] = sanitized
+    return sanitized
+
+
+def _prepare_day_type_list(raw_day_types, days):
+    if isinstance(raw_day_types, list):
+        if len(raw_day_types) != days:
+            raise InputValidationError(
+                "dayTypeByDate length does not match days.",
+                code="invalid_day_type_length",
+                details={"expected": days, "actual": len(raw_day_types)},
+            )
+        result = []
+        for index, value in enumerate(raw_day_types, start=1):
+            if not isinstance(value, str) or not value:
+                raise InputValidationError(
+                    "dayTypeByDate must contain non-empty strings.",
+                    code="invalid_day_type_value",
+                    details={"day": index, "value": value},
+                )
+            result.append(value)
+        return result
+
+    if isinstance(raw_day_types, dict):
+        result = []
+        missing = []
+        for day in range(1, days + 1):
+            value = None
+            if day in raw_day_types:
+                value = raw_day_types[day]
+            elif str(day) in raw_day_types:
+                value = raw_day_types[str(day)]
+            if value is None:
+                missing.append(day)
+                continue
+            if not isinstance(value, str) or not value:
+                raise InputValidationError(
+                    "dayTypeByDate must contain non-empty strings.",
+                    code="invalid_day_type_value",
+                    details={"day": day, "value": value},
+                )
+            result.append(value)
+        if missing:
+            raise InputValidationError(
+                "dayTypeByDate is missing entries.",
+                code="missing_day_type",
+                details={"missingDays": missing},
+            )
+        return result
+
+    raise InputValidationError(
+        "dayTypeByDate must be an array or object.",
+        code="invalid_day_type",
+    )
+
+
+def _sanitize_need_template(raw_template):
+    if not isinstance(raw_template, dict) or not raw_template:
+        raise InputValidationError(
+            "needTemplate must be a non-empty object.",
+            code="invalid_need_template",
+        )
+
+    sanitized = {}
+    for day_type, raw_slots in raw_template.items():
+        if not isinstance(day_type, str) or not day_type:
+            raise InputValidationError(
+                "needTemplate keys must be strings.",
+                code="invalid_need_template_key",
+                details={"key": day_type},
+            )
+        if not isinstance(raw_slots, dict):
+            raise InputValidationError(
+                "Each needTemplate entry must be an object of slot requirements.",
+                code="invalid_need_template_slots",
+                details={"dayType": day_type},
+            )
+        slots = {}
+        for slot in NEED_TEMPLATE_SLOTS:
+            value = raw_slots.get(slot, 0)
+            ivalue = _as_non_negative_int(value)
+            slots[slot] = ivalue
+        sanitized[day_type] = slots
+    return sanitized
+
+
+def prepare_demand(data):
+    days = data.get("days")
+    if not isinstance(days, int) or days <= 0:
+        raise InputValidationError(
+            "days must be a positive integer.",
+            code="invalid_days",
+            details={"days": days},
+        )
+
+    weekday0 = data.get("weekdayOfDay1")
+    if not isinstance(weekday0, int) or not (0 <= weekday0 <= 6):
+        raise InputValidationError(
+            "weekdayOfDay1 must be an integer between 0 and 6.",
+            code="invalid_weekday_of_day1",
+            details={"weekdayOfDay1": weekday0},
+        )
+
+    day_types = _prepare_day_type_list(data.get("dayTypeByDate"), days)
+    need_template = _sanitize_need_template(data.get("needTemplate"))
+
+    for day, day_type in enumerate(day_types, start=1):
+        if day_type not in need_template:
+            raise InputValidationError(
+                "dayTypeByDate references unknown day type.",
+                code="unknown_day_type",
+                details={"day": day, "dayType": day_type},
+            )
+
+    previous_carry = _ensure_previous_month_carry(data)
+    carry = 0
+    if days >= 1:
+        carry = sum(len(previous_carry.get(key, [])) for key in ("NA", "NB", "NC"))
+
+    per_day = []
+    total_need = 0
+    for day_index, day_type in enumerate(day_types, start=1):
+        slots = need_template[day_type]
+        day_summary = {
+            "date": day_index,
+            "slots": {
+                "7-9": slots["7-9"],
+                "9-15": slots["9-15"],
+                "16-18": slots["16-18"],
+            },
+        }
+        evening_need = slots["18-24"] or 0
+        midnight_need = slots["0-7"] or 0
+        carry_today = carry if day_index == 1 else 0
+        effective_midnight = max(0, midnight_need - carry_today)
+        day_summary["slots"].update({"18-21": evening_need, "21-23": evening_need, "0-7": effective_midnight})
+        day_summary["total"] = sum(day_summary["slots"].values())
+        day_summary["carryApplied"] = bool(carry_today and midnight_need)
+        per_day.append(day_summary)
+        total_need += day_summary["total"]
+
+    diagnostics = {
+        "days": days,
+        "weekdayOfDay1": weekday0,
+        "dayTypeSample": day_types[: min(7, len(day_types))],
+        "perDayTotals": per_day,
+        "totalNeed": total_need,
+    }
+
+    if total_need == 0:
+        raise InputValidationError(
+            "Total demand is zero. All staff will remain off-duty.",
+            code="total_need_zero",
+            details={"demandDiagnostics": diagnostics},
+        )
+
+    diagnostics.setdefault("warnings", [])
+    return PreparedDemand(days, weekday0, day_types, need_template, diagnostics)
+
+
+def log_demand_diagnostics(diagnostics):
+    if not isinstance(diagnostics, dict):
+        return
+    days = diagnostics.get("days")
+    weekday0 = diagnostics.get("weekdayOfDay1")
+    print(f"[demand] days={days} weekdayOfDay1={weekday0}")
+    sample = diagnostics.get("dayTypeSample") or []
+    if sample:
+        print(f"[demand] dayType sample={sample}")
+    per_day = diagnostics.get("perDayTotals") or []
+    for entry in per_day[: min(5, len(per_day))]:
+        slots = entry.get("slots", {})
+        ordered = {slot: slots.get(slot) for slot in ["7-9", "9-15", "16-18", "18-21", "21-23", "0-7"]}
+        print(f"[demand] day {entry.get('date')} total={entry.get('total')} slots={ordered}")
+    print(f"[demand] totalNeed={diagnostics.get('totalNeed')}")
+
+
+def build_validation_error_output(data, error: InputValidationError):
+    people = data.get("people")
+    if not isinstance(people, list):
+        people = []
+    ids = []
+    for person in people:
+        pid = None
+        if isinstance(person, dict):
+            pid = person.get("id")
+        if isinstance(pid, str):
+            ids.append(pid)
+
+    summary = {
+        "shortage": [],
+        "overstaff": [],
+        "totals": {
+            "shortage": 0,
+            "overstaff": 0,
+            "wishOffViolations": 0,
+            "requestedOffViolations": 0,
+            "violatedPreferences": 0,
+        },
+        "diagnostics": {},
+    }
+
+    diagnostics = error.details.get("demandDiagnostics")
+    if diagnostics:
+        diagnostics = dict(diagnostics)
+        warnings = list(diagnostics.get("warnings", []))
+        if error.code == "total_need_zero":
+            warnings.append(
+                "総需要が0です。需要テンプレートや曜日設定を確認してください。"
+            )
+        diagnostics["warnings"] = warnings
+        summary["diagnostics"]["demand"] = diagnostics
+        log_demand_diagnostics(diagnostics)
+
+    return {
+        "assignments": [],
+        "peopleOrder": ids,
+        "matrix": [],
+        "summary": summary,
+        "error": {
+            "code": error.code,
+            "message": error.message,
+            "details": error.details,
+        },
+    }
 
 def parse_slot(slot_label):
     a, b = map(int, slot_label.split("-"))
@@ -222,7 +491,19 @@ def estimate_slot_max_possible(data):
     return slot_capacity
 
 def solve(data, time_limit=10.0):
-    days_count = int(data["days"])
+    try:
+        prepared = prepare_demand(data)
+    except InputValidationError as error:
+        return build_validation_error_output(data, error)
+
+    log_demand_diagnostics(prepared.diagnostics)
+
+    data["days"] = prepared.days
+    data["weekdayOfDay1"] = prepared.weekday0
+    data["dayTypeByDate"] = prepared.day_types
+    data["needTemplate"] = prepared.need_template
+
+    days_count = prepared.days
     days = range(1, days_count + 1)
     staff = data["people"]
     shifts = data["shifts"]
@@ -466,6 +747,7 @@ def solve(data, time_limit=10.0):
                             "shift": shifts[k]["code"]
                         })
         out["summary"] = compute_summary(data, out["assignments"], s_values)
+        out["summary"].setdefault("diagnostics", {})["demand"] = prepared.diagnostics
     else:
         out["infeasible"] = True
         slot_caps = estimate_slot_max_possible(data)
@@ -627,6 +909,7 @@ def solve(data, time_limit=10.0):
                 "wishOffConflictCount": wish_off_conflict_count,
             }
         )
+        summary["diagnostics"]["demand"] = prepared.diagnostics
     ids = [p["id"] for p in staff]
     matrix_rows = []
     for d in days:

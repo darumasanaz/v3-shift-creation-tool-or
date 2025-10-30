@@ -20,17 +20,48 @@ type SummaryTotals = {
   [key: string]: number | undefined;
 };
 
+type DemandDiagnosticsDay = {
+  date?: number;
+  total?: number;
+  slots?: Record<string, number>;
+  carryApplied?: boolean;
+};
+
+type DemandDiagnostics = {
+  days?: number;
+  weekdayOfDay1?: number;
+  dayTypeSample?: string[];
+  perDayTotals?: DemandDiagnosticsDay[];
+  totalNeed?: number;
+  warnings?: string[];
+  [key: string]: unknown;
+};
+
+type SummaryDiagnostics = {
+  demand?: DemandDiagnostics;
+  [key: string]: unknown;
+};
+
 type Summary = {
   totals?: SummaryTotals;
+  diagnostics?: SummaryDiagnostics;
+};
+
+type SolverErrorInfo = {
+  code?: string;
+  message?: string;
+  details?: Record<string, unknown>;
 };
 
 type ScheduleData = {
   peopleOrder: string[];
   matrix: MatrixEntry[];
   summary?: Summary;
+  error?: SolverErrorInfo | null;
 };
 
 const NIGHT_SHIFT_CODES = new Set(['NA', 'NB', 'NC']);
+const DEMAND_SLOTS: string[] = ['7-9', '9-15', '16-18', '18-21', '21-23', '0-7'];
 
 type SummaryCard = {
   key: keyof SummaryTotals;
@@ -188,6 +219,33 @@ export default function ViewerPage() {
   const [pendingInput, setPendingInput] = useState<Record<string, unknown> | null>(null);
   const [inputAnalysis, setInputAnalysis] = useState<InputDetection | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const solverErrorInfo = schedule?.error;
+  const solverErrorMessage =
+    solverErrorInfo && typeof solverErrorInfo === 'object' && solverErrorInfo !== null
+      ? typeof solverErrorInfo.message === 'string' && solverErrorInfo.message
+        ? solverErrorInfo.message
+        : typeof solverErrorInfo.code === 'string'
+        ? `solver error: ${solverErrorInfo.code}`
+        : null
+      : null;
+  const demandDiagnostics = schedule?.summary?.diagnostics?.demand;
+  const demandWarnings = useMemo(() => {
+    const messages: string[] = [];
+    if (solverErrorMessage) {
+      messages.push(solverErrorMessage);
+    }
+    if (demandDiagnostics) {
+      const warnings = Array.isArray(demandDiagnostics.warnings)
+        ? demandDiagnostics.warnings.filter((item): item is string => typeof item === 'string')
+        : [];
+      messages.push(...warnings);
+      if (warnings.length === 0 && demandDiagnostics.totalNeed === 0) {
+        messages.push('総需要が0のため、全員休みのスケジュールになっています。入力条件を見直してください。');
+      }
+    }
+    return messages;
+  }, [demandDiagnostics, solverErrorMessage]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -410,7 +468,8 @@ export default function ViewerPage() {
   const scheduleView = useMemo(() => {
     if (!schedule) return null;
 
-    const dates = schedule.matrix.map((entry, index) => {
+    const matrix = Array.isArray(schedule.matrix) ? schedule.matrix : [];
+    const dates = matrix.map((entry, index) => {
       const label = formatDate(entry.date);
       return {
         label,
@@ -420,7 +479,7 @@ export default function ViewerPage() {
 
     const rows = schedule.peopleOrder.map((person) => ({
       person,
-      shifts: schedule.matrix.map((entry) => entry.shifts[person] ?? ''),
+      shifts: matrix.map((entry) => entry.shifts[person] ?? ''),
     }));
 
     return { dates, rows };
@@ -516,6 +575,17 @@ export default function ViewerPage() {
           </div>
         )}
 
+        {demandWarnings.length > 0 && (
+          <div
+            className="space-y-1 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+            role="alert"
+          >
+            {demandWarnings.map((message, index) => (
+              <p key={`${message}-${index}`}>{message}</p>
+            ))}
+          </div>
+        )}
+
         {error && (
           <div
             className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 whitespace-pre-line"
@@ -552,6 +622,80 @@ export default function ViewerPage() {
             </div>
           ))}
         </section>
+
+        {demandDiagnostics && (
+          <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm" aria-label="需要診断">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">需要診断</h2>
+              <p className="text-sm text-slate-500">solver が展開した需要テンプレートの概要です。</p>
+            </div>
+            <dl className="grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
+              <div className="flex items-center justify-between gap-3 rounded-md bg-slate-100 px-3 py-2">
+                <dt className="font-medium text-slate-600">days</dt>
+                <dd>{demandDiagnostics.days ?? '—'}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-md bg-slate-100 px-3 py-2">
+                <dt className="font-medium text-slate-600">weekdayOfDay1</dt>
+                <dd>{demandDiagnostics.weekdayOfDay1 ?? '—'}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-md bg-slate-100 px-3 py-2 sm:col-span-2">
+                <dt className="font-medium text-slate-600">totalNeed</dt>
+                <dd>{demandDiagnostics.totalNeed ?? 0}</dd>
+              </div>
+              {Array.isArray(demandDiagnostics.dayTypeSample) && demandDiagnostics.dayTypeSample.length > 0 && (
+                <div className="flex items-center justify-between gap-3 rounded-md bg-slate-100 px-3 py-2 sm:col-span-2">
+                  <dt className="font-medium text-slate-600">dayType sample</dt>
+                  <dd className="truncate text-right">{demandDiagnostics.dayTypeSample.join(', ')}</dd>
+                </div>
+              )}
+            </dl>
+            {Array.isArray(demandDiagnostics.perDayTotals) && demandDiagnostics.perDayTotals.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="min-w-full border-collapse text-left text-sm">
+                  <thead className="bg-slate-100">
+                    <tr>
+                      <th scope="col" className="border border-slate-200 px-3 py-2 font-semibold text-slate-700">
+                        日付
+                      </th>
+                      <th scope="col" className="border border-slate-200 px-3 py-2 font-semibold text-slate-700">
+                        合計
+                      </th>
+                      {DEMAND_SLOTS.map((slot) => (
+                        <th
+                          key={`diag-slot-${slot}`}
+                          scope="col"
+                          className="border border-slate-200 px-3 py-2 font-semibold text-slate-700"
+                        >
+                          {slot}
+                        </th>
+                      ))}
+                      <th scope="col" className="border border-slate-200 px-3 py-2 font-semibold text-slate-700">
+                        carry
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {demandDiagnostics.perDayTotals.map((entry) => {
+                      const slots = entry.slots ?? {};
+                      return (
+                        <tr key={`diag-day-${entry.date ?? 'unknown'}`} className="odd:bg-white even:bg-slate-50">
+                          <td className="border border-slate-200 px-3 py-2">{entry.date ?? '—'}</td>
+                          <td className="border border-slate-200 px-3 py-2">{entry.total ?? 0}</td>
+                          {DEMAND_SLOTS.map((slot) => (
+                            <td key={`diag-day-${entry.date}-${slot}`} className="border border-slate-200 px-3 py-2">
+                              {slots[slot] ?? 0}
+                            </td>
+                          ))}
+                          <td className="border border-slate-200 px-3 py-2">{entry.carryApplied ? 'あり' : 'なし'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        )}
 
         {scheduleView ? (
           <section
