@@ -352,8 +352,11 @@ export default function ConfigPage() {
             className="rounded-md bg-indigo-600 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
             disabled={!template}
           >
-            JSONダウンロード
+            入力JSONをダウンロード（solver用）
           </button>
+          <p className="text-sm text-slate-500">
+            Viewer は出力JSON（output.json）を表示します。入力JSONを読み込む場合は開発モードで solver を実行してください。
+          </p>
         </form>
       </main>
     </div>

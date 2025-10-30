@@ -43,10 +43,11 @@ Vite + React + TypeScript + Tailwind CSS 構成で、シフト条件の作成と
 - 最大連勤・ルール（noEarlyAfterDayAB / 夜勤明け休息日数）の編集
 - ローカル保存（localStorage）、保存データの読み込み
 - サンプル読込（`solver/sample_input_real.json` をベースにフォームへ反映）
-- JSON ダウンロード（入力した people / rules / wishOffs を差し込んだ `input.json`）
+- 「入力JSONをダウンロード（solver用）」ボタンで people / rules / wishOffs を差し込んだ `input.json` を生成
 
 ### Viewer ページ（出力JSONビューア）
 OR-Tools の結果ファイル `solver/output.json` をローカルで読み込み、日付×スタッフのシフト表として確認できます。
+Config ページで生成した `input.json` を読み込んだ場合は、開発モードの `/api/solve` を利用して solver を自動実行し、結果を即座に表示します（本番環境では出力 JSON のみ表示）。
 
 - summary カードでは不足・過剰に加えて希望休違反（wishOffViolations）を表示
 
@@ -68,7 +69,8 @@ npm run dev
 
 その後、ブラウザで [http://localhost:5173](http://localhost:5173) を開き、上部ナビゲーションから Viewer / Config / WishOffs を切り替えられます。
 Viewer ページでは `solver/output.json` をドラッグ＆ドロップするか「JSONを読み込み」ボタンから選択してください。
-Config ページでは条件を入力して「JSONダウンロード」で solver 入力を取得できます。
+Config ページでは条件を入力して「入力JSONをダウンロード（solver用）」で solver 入力を取得できます。
+開発モードで `input.json` を読み込むと `/api/solve` 経由で solver が実行され、得られた出力 JSON がそのまま表示されます（本番配信時は output.json を読み込ませてください）。
 
 ### サンプル読込の準備
 1. 最適化を実行して出力を生成します。
