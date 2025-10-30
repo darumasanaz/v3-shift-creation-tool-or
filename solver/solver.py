@@ -41,9 +41,12 @@ def compute_summary(data, assignments, s_values):
     summary = {
         "shortage": [],
         "overstaff": [],
-        "totals": {"shortage": 0, "overstaff": 0},
+        "totals": {"shortage": 0, "overstaff": 0, "requestedOffViolations": 0},
     }
-    _ = assignments  # assignments kept for future use / interface compatibility
+    requested_off_map = {
+        person.get("id"): set(person.get("requestedOffDates", []))
+        for person in data.get("people", [])
+    }
 
     def add_shortage(date, slot, lack):
         summary["shortage"].append({"date": date, "slot": slot, "lack": int(lack)})
@@ -104,6 +107,12 @@ def compute_summary(data, assignments, s_values):
             add_shortage(d, "0-7", lack)
         if excess > 0:
             add_overstaff(d, "0-7", excess)
+
+    for assignment in assignments:
+        staff_id = assignment.get("staffId")
+        date = assignment.get("date")
+        if date in requested_off_map.get(staff_id, set()):
+            summary["totals"]["requestedOffViolations"] += 1
 
     return summary
 
@@ -202,6 +211,19 @@ def solve(data, time_limit=10.0):
             for a, b in weeks:
                 m.Add(sum(work[d, i] for d in range(a, b + 1)) <= wmax)
 
+    # 3c) 月間上限
+    for i, p in enumerate(staff):
+        mmax = p.get("monthlyMax", 0)
+        if mmax and mmax > 0:
+            m.Add(sum(work[d, i] for d in days) <= mmax)
+
+    # 3d) 特定日NG
+    for i, p in enumerate(staff):
+        unavailable = set(p.get("unavailableDates", []))
+        for d in days:
+            if d in unavailable:
+                m.Add(sum(x[d, i, k] for k in K) == 0)
+
     # 4) 夜勤明け休み
     idxNA, idxNB, idxNC = code_index.get("NA"), code_index.get("NB"), code_index.get("NC")
     for d in days:
@@ -266,6 +288,20 @@ def solve(data, time_limit=10.0):
     # 8) 日中下限 + 9) need+1超の過剰ペナルティ
     weights = data["weights"]
     penalties = []
+
+    default_requested_weight = weights.get("W_requested_off_violation", 20)
+    for i, p in enumerate(staff):
+        requested = set(p.get("requestedOffDates", []))
+        if not requested:
+            continue
+        weight = p.get("requestedOffWeight", default_requested_weight)
+        for d in requested:
+            if d in days:
+                viol = m.NewBoolVar(f"requested_off_violation_d{d}_i{i}")
+                m.Add(viol >= work[d, i])
+                m.Add(viol <= work[d, i])
+                penalties.append(weight * viol)
+
     for d in days:
         dayType = data["dayTypeByDate"][d-1]
         needs = data["needTemplate"][dayType]
@@ -333,7 +369,14 @@ def solve(data, time_limit=10.0):
                     f"[diagnostic] day {item['date']} slot {item['slot']}: need {item['need']} maxPossible {item['maxPossible']}"
                 )
         out["diagnostics"] = {"unmetCandidates": diagnostics}
-        out.setdefault("summary", {"shortage": [], "overstaff": [], "totals": {"shortage": 0, "overstaff": 0}})
+        out.setdefault(
+            "summary",
+            {
+                "shortage": [],
+                "overstaff": [],
+                "totals": {"shortage": 0, "overstaff": 0, "requestedOffViolations": 0},
+            },
+        )
     return out
 
 def main():

@@ -26,6 +26,7 @@
     "W_overstaff_gt_need_plus1": 5,
     "W_balance_workdays": 1,
     "W_prefer_fill_morning7_9": 10,
-    "W_fill_9_15": 3
+    "W_fill_9_15": 3,
+    "W_requested_off_violation": 20
   }
 }
