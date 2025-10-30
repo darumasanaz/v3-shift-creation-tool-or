@@ -26,7 +26,7 @@
       "id":"p3","canWork":["EA","DA","NB","NC"],"weeklyMax":7,"monthlyMax":31,"consecMax":5
     }
   ],
-  "rules": { "noEarlyAfterDayAB": true, "nightRest": { "NA":2,"NB":0,"NC":1 }},
+  "rules": { "noEarlyAfterDayAB": true, "nightRest": { "NA":2,"NB":1,"NC":1 }},
   "weights": {
     "W_shortage":1000,"W_overstaff_gt_need_plus1":5,"W_balance_workdays":1,
     "W_prefer_fill_morning7_9":10,"W_fill_9_15":3,

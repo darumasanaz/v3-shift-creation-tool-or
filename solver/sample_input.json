@@ -40,7 +40,7 @@
   ],
   "rules": {
     "noEarlyAfterDayAB": true,
-    "nightRest": { "NA": 2, "NB": 0, "NC": 1 }
+    "nightRest": { "NA": 2, "NB": 1, "NC": 1 }
   },
   "weights": {
     "W_shortage": 1000,

@@ -48,3 +48,23 @@ Each person entry supports the following properties:
 | `W_requested_off_violation` | Penalty per person-day when a requested off day is worked, used when the individual weight is not supplied. | 20 |
 
 Unspecified weights should fall back to the defaults used in `sample_input.json`.
+
+## Rules
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `noEarlyAfterDayAB` | boolean | `false` | When `true`, forbids assigning `EA` on the day immediately following a `DA` or `DB` shift for the same person. |
+| `nightRest` | object | `{ "NA": 2, "NB": 1, "NC": 1 }` | Mapping of night shift code → required consecutive rest days after working that shift. Each value `r` (integer, `r >= 1`) prevents assignments on the next `r` days. Codes not present or non-positive values are ignored. |
+
+## Output Format
+
+Successful solves produce an object with at least the following fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `assignments` | array | List of `{ "date": int, "staffId": string, "shift": string }` objects describing each scheduled shift. |
+| `peopleOrder` | array[string] | Ordered list of staff IDs. Matches the ordering of `people` in the input and is used for the matrix representation. |
+| `matrix` | array | Per-day schedule rows. Each row is `{ "date": int, "shifts": { <staffId>: <shiftCode or ""> } }`. Empty strings represent days off. |
+| `summary` | object | Aggregated shortage/overstaff/requested-off information. |
+
+If the solver cannot find a feasible solution within the time limit, the output additionally includes `infeasible: true` and may attach diagnostic information under `diagnostics`.

@@ -20,7 +20,7 @@
     {"id":"s2","canWork":["EA","DA","LA","NB","NC"],"fixedOffWeekdays":[],"weeklyMax":6,"monthlyMax":31,"consecMax":5},
     {"id":"s3","canWork":["EA","DA","LA","NB","NC"],"fixedOffWeekdays":[],"weeklyMax":6,"monthlyMax":31,"consecMax":5}
   ],
-  "rules": { "noEarlyAfterDayAB": true, "nightRest": { "NA": 2, "NB": 0, "NC": 1 } },
+  "rules": { "noEarlyAfterDayAB": true, "nightRest": { "NA": 2, "NB": 1, "NC": 1 } },
   "weights": {
     "W_shortage": 1000,
     "W_overstaff_gt_need_plus1": 5,

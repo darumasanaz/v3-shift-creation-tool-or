@@ -164,6 +164,7 @@ def solve(data, time_limit=10.0):
     days = range(1, data["days"]+1)
     staff = data["people"]
     shifts = data["shifts"]
+    rules = data.get("rules", {})
     I = range(len(staff))
     K = range(len(shifts))
 
@@ -225,18 +226,23 @@ def solve(data, time_limit=10.0):
                 m.Add(sum(x[d, i, k] for k in K) == 0)
 
     # 4) 夜勤明け休み
-    idxNA, idxNB, idxNC = code_index.get("NA"), code_index.get("NB"), code_index.get("NC")
+    rest_map = rules.get("nightRest", {})
     for d in days:
         for i in I:
-            if idxNA is not None:
-                if d+1 in days:
-                    m.Add(work[d+1,i] == 0).OnlyEnforceIf(x[d,i,idxNA])
-                if d+2 in days:
-                    m.Add(work[d+2,i] == 0).OnlyEnforceIf(x[d,i,idxNA])
-            if idxNC is not None:
-                if d+1 in days:
-                    m.Add(work[d+1,i] == 0).OnlyEnforceIf(x[d,i,idxNC])
-            # NBは制限なし
+            for code, r in rest_map.items():
+                k = code_index.get(code)
+                if k is None or r is None:
+                    continue
+                try:
+                    r_int = int(r)
+                except (TypeError, ValueError):
+                    continue
+                if r_int <= 0:
+                    continue
+                for t in range(1, r_int + 1):
+                    next_day = d + t
+                    if next_day in days:
+                        m.Add(work[next_day, i] == 0).OnlyEnforceIf(x[d, i, k])
 
     # 5) 最大連勤
     for i, p in enumerate(staff):
@@ -249,7 +255,7 @@ def solve(data, time_limit=10.0):
                 m.Add(sum(work[t,i] for t in window) <= L)
 
     # 6) 前日がDA/DB → 翌日EA不可
-    if data["rules"].get("noEarlyAfterDayAB", True):
+    if rules.get("noEarlyAfterDayAB", False):
         ida = code_index.get("DA")
         idb = code_index.get("DB")
         iea = code_index.get("EA")
@@ -377,6 +383,20 @@ def solve(data, time_limit=10.0):
                 "totals": {"shortage": 0, "overstaff": 0, "requestedOffViolations": 0},
             },
         )
+    ids = [p["id"] for p in staff]
+    matrix_rows = []
+    for d in days:
+        matrix_rows.append({"date": d, "shifts": {pid: "" for pid in ids}})
+    for assignment in out["assignments"]:
+        date = assignment.get("date")
+        pid = assignment.get("staffId")
+        shift = assignment.get("shift", "")
+        if isinstance(date, int) and 1 <= date <= len(matrix_rows):
+            row = matrix_rows[date - 1]["shifts"]
+            if pid in row:
+                row[pid] = shift
+    out["peopleOrder"] = ids
+    out["matrix"] = matrix_rows
     return out
 
 def main():
