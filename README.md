@@ -24,6 +24,22 @@ npm run dev
 
 その後、ブラウザで [http://localhost:5173](http://localhost:5173) を開き、`solver/output.json` をドラッグ＆ドロップするか「JSONを読み込み」ボタンから選択してください。
 
+### サンプル読込の準備
+1. 最適化を実行して出力を生成します。
+   ```bash
+   source .venv/bin/activate
+   python solver/solver.py --in solver/sample_input_real.json --out solver/output.json --time_limit 30
+   ```
+2. フロントエンドから参照できる場所へコピーします。
+   ```bash
+   cd frontend
+   npm run copy:out
+   npm run dev
+   ```
+3. ブラウザで [http://localhost:5173](http://localhost:5173) を開き、右上の「サンプル読込」をクリックすると `public/output.json` が即座に表示されます。
+
+`output.json` が見つからない場合（例: 404 エラー）は `npm run copy:out` を再実行してからリロードしてください。
+
 ### 主な機能
 - 固定ヘッダ付きのシフト表（横スクロール対応）
 - `summary.totals` の不足 / 過剰 / 希望休違反をカード表示

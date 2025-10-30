@@ -84,6 +84,25 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const loadSample = async () => {
+    try {
+      const res = await fetch('/output.json', { cache: 'no-store' });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const json = (await res.json()) as ScheduleData;
+      if (!Array.isArray(json.peopleOrder) || !Array.isArray(json.matrix)) {
+        throw new Error('Invalid schema');
+      }
+      setSchedule(json);
+      setError(null);
+      alert('読み込み完了');
+    } catch (e) {
+      console.error(e);
+      alert('output.json が見つかりません。READMEの「サンプル読込の準備」を参照してください。');
+    }
+  };
+
   const handleFile = (file: File | undefined | null) => {
     if (!file) return;
 
@@ -156,6 +175,13 @@ export default function App() {
               className="sr-only"
               onChange={onFileChange}
             />
+            <button
+              type="button"
+              onClick={loadSample}
+              className="rounded-lg border border-indigo-200 px-4 py-2 text-sm font-medium text-indigo-700 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50"
+            >
+              サンプル読込
+            </button>
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
