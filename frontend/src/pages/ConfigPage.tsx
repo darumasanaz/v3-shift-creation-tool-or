@@ -2,7 +2,12 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { StaffForm } from '../components/StaffForm';
 import { buildSolverInput, deserializePeople, deserializeRules } from '../lib/jsonBuilders';
-import { CONFIG_STORAGE_KEY } from '../lib/storageKeys';
+import {
+  CONFIG_STORAGE_KEY,
+  LAST_OUTPUT_STORAGE_KEY,
+  LAST_OUTPUT_UPDATED_AT_KEY,
+} from '../lib/storageKeys';
+import { requestSolve, SolveError, isSolveAvailable } from '../lib/solveClient';
 import { loadWishOffsFromStorage } from '../lib/wishOffs';
 import { FormState, Person, Rules, ShiftCode, WeekdayJ } from '../types/config';
 const SAMPLE_PATH = '/sample_input_real.json';
@@ -94,6 +99,7 @@ export default function ConfigPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoadingSample, setIsLoadingSample] = useState(false);
+  const [isExecuting, setIsExecuting] = useState(false);
 
   useEffect(() => {
     const fromStorage = () => {
@@ -225,6 +231,47 @@ export default function ConfigPage() {
     setError(null);
   };
 
+  const handleExecute = async () => {
+    if (!isSolveAvailable) {
+      setStatus(null);
+      setError('solver 実行は開発モード限定です。');
+      return;
+    }
+
+    if (!template) {
+      setStatus(null);
+      setError('サンプルテンプレートの取得を待っています');
+      return;
+    }
+
+    setIsExecuting(true);
+    setStatus(null);
+    setError(null);
+
+    try {
+      const wishOffs = loadWishOffsFromStorage();
+      const inputJson = buildSolverInput(template, formState, { wishOffs });
+      const output = await requestSolve(inputJson);
+
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(LAST_OUTPUT_STORAGE_KEY, JSON.stringify(output));
+        window.localStorage.setItem(LAST_OUTPUT_UPDATED_AT_KEY, new Date().toISOString());
+      }
+
+      window.location.href = '/?from=config';
+    } catch (err) {
+      setStatus(null);
+      setError('solver 実行に失敗しました。条件を見直すか、ログを開いてください。');
+      if (err instanceof SolveError) {
+        console.error('solver execution failed', { status: err.status, body: err.body });
+      } else {
+        console.error(err);
+      }
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
   const duplicateIdCount = useMemo(() => {
     const ids = formState.people.map((person) => person.id.trim()).filter(Boolean);
     return ids.filter((id, index) => ids.indexOf(id) !== index).length;
@@ -353,6 +400,37 @@ export default function ConfigPage() {
             disabled={!template}
           >
             入力JSONをダウンロード（solver用）
+          </button>
+          <button
+            type="button"
+            onClick={handleExecute}
+            disabled={!template || isExecuting}
+            className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 disabled:cursor-not-allowed disabled:bg-slate-400"
+          >
+            {isExecuting && (
+              <svg
+                className="h-4 w-4 animate-spin"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                />
+              </svg>
+            )}
+            {isExecuting ? '実行中…' : 'この条件で実行'}
           </button>
           <p className="text-sm text-slate-500">
             Viewer は出力JSON（output.json）を表示します。入力JSONを読み込む場合は開発モードで solver を実行してください。

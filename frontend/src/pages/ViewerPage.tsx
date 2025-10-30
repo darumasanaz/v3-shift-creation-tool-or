@@ -1,5 +1,10 @@
-import { ChangeEvent, DragEvent, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
+import {
+  LAST_OUTPUT_STORAGE_KEY,
+  LAST_OUTPUT_UPDATED_AT_KEY,
+} from '../lib/storageKeys';
+import { requestSolve, SolveError } from '../lib/solveClient';
 
 type ShiftCode = string;
 
@@ -177,11 +182,48 @@ export default function ViewerPage() {
   const [schedule, setSchedule] = useState<ScheduleData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [autoMessage, setAutoMessage] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isSolving, setIsSolving] = useState(false);
   const [pendingInput, setPendingInput] = useState<Record<string, unknown> | null>(null);
   const [inputAnalysis, setInputAnalysis] = useState<InputDetection | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(LAST_OUTPUT_STORAGE_KEY);
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw) as unknown;
+      const detection = detectScheduleJson(parsed);
+      if (detection.kind !== 'output') {
+        return;
+      }
+
+      setSchedule(parsed as ScheduleData);
+      setError(null);
+      setNotice(null);
+      setPendingInput(null);
+      setInputAnalysis(null);
+
+      const updatedAtRaw = window.localStorage.getItem(LAST_OUTPUT_UPDATED_AT_KEY);
+      let timestamp = '';
+      if (updatedAtRaw) {
+        const parsedDate = new Date(updatedAtRaw);
+        if (!Number.isNaN(parsedDate.getTime())) {
+          timestamp = parsedDate.toLocaleTimeString('ja-JP', { hour12: false });
+        }
+      }
+      if (!timestamp) {
+        timestamp = new Date().toLocaleTimeString('ja-JP', { hour12: false });
+      }
+
+      setAutoMessage(`Configからの実行結果を表示しています（最終更新: ${timestamp}）`);
+    } catch (storageError) {
+      console.error('failed to load last output from storage', storageError);
+    }
+  }, []);
 
   const formatKeyList = (keys: string[]): string => keys.join('、');
 
@@ -229,16 +271,7 @@ export default function ViewerPage() {
     setError(null);
     setNotice(`${buildInputSummary(analysis)} solverを実行しています…`);
     try {
-      const res = await fetch('/api/solve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`HTTP ${res.status}: ${text}`);
-      }
-      const solved = await res.json();
+      const solved = await requestSolve(input);
       const detection = detectScheduleJson(solved);
       if (detection.kind !== 'output') {
         throw new Error('Solver result did not match the expected output schema.');
@@ -246,11 +279,17 @@ export default function ViewerPage() {
       setSchedule(solved as ScheduleData);
       setError(null);
       setNotice(`${buildInputSummary(analysis)} solverの実行が完了しました。`);
+      setAutoMessage(null);
     } catch (solverError) {
-      console.error(solverError);
+      if (solverError instanceof SolveError) {
+        console.error('solver execution failed', { status: solverError.status, body: solverError.body });
+      } else {
+        console.error(solverError);
+      }
       setSchedule(null);
       setError('solverの実行に失敗しました。開発サーバーのログを確認してください。');
       setNotice(buildInputSummary(analysis));
+      setAutoMessage(null);
     } finally {
       setIsSolving(false);
     }
@@ -271,6 +310,7 @@ export default function ViewerPage() {
       setNotice(null);
       setPendingInput(null);
       setInputAnalysis(null);
+      setAutoMessage(null);
       alert('読み込み完了');
     } catch (e) {
       console.error(e);
@@ -296,6 +336,7 @@ export default function ViewerPage() {
           setNotice(null);
           setPendingInput(null);
           setInputAnalysis(null);
+          setAutoMessage(null);
         } else if (detection.kind === 'input') {
           setSchedule(null);
           setPendingInput(parsed as Record<string, unknown>);
@@ -306,12 +347,14 @@ export default function ViewerPage() {
             setError(buildInputGuidance(detection));
             setNotice(null);
           }
+          setAutoMessage(null);
         } else {
           setSchedule(null);
           setError(buildUnknownMessage(detection));
           setNotice(null);
           setPendingInput(null);
           setInputAnalysis(null);
+          setAutoMessage(null);
         }
       } catch (e) {
         console.error(e);
@@ -320,6 +363,7 @@ export default function ViewerPage() {
         setNotice(null);
         setPendingInput(null);
         setInputAnalysis(null);
+        setAutoMessage(null);
       }
     };
     reader.onerror = () => {
@@ -328,6 +372,7 @@ export default function ViewerPage() {
       setNotice(null);
       setPendingInput(null);
       setInputAnalysis(null);
+      setAutoMessage(null);
     };
     reader.readAsText(file, 'utf-8');
   };
@@ -434,6 +479,14 @@ export default function ViewerPage() {
       </header>
 
       <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6">
+        {autoMessage && (
+          <div
+            className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+            role="status"
+          >
+            {autoMessage}
+          </div>
+        )}
         <section
           className={`flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-indigo-300 bg-white p-8 text-center transition ${
             isDragging ? 'border-indigo-500 bg-indigo-50' : ''
