@@ -3,6 +3,26 @@
 OR-Tools (CP-SAT) を使ったシフト作成の最適化コア（v3）。
 最小構成：`/solver` に CP-SAT モデル、`/frontend` は既存 UI や連携の置き場。
 
+## Quick Run (one command)
+Codespaces ならリポジトリ直下で:
+```bash
+bash run_all.sh
+```
+
+環境変数で調整可:
+
+```bash
+TIME_LIMIT=90 PORT=5174 bash run_all.sh
+```
+
+Windows ローカル:
+
+```powershell
+./run_all.ps1
+```
+
+実行後、ブラウザで http://localhost:<PORT> を開き、右上のサンプル読込で表示。
+
 ## Quick Start
 ```bash
 python -m venv .venv

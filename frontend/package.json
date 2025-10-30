@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "copy:out": "cp -f ../solver/output.json ./public/output.json",
+    "copy:out": "mkdir -p public && cp -f ../solver/output.json ./public/output.json",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
