@@ -162,6 +162,25 @@ export default function App() {
       ? 'bg-indigo-50 text-indigo-900'
       : '';
 
+  const scheduleView = useMemo(() => {
+    if (!schedule) return null;
+
+    const dates = schedule.matrix.map((entry, index) => {
+      const label = formatDate(entry.date);
+      return {
+        label,
+        key: `${label}-${index}`,
+      };
+    });
+
+    const rows = schedule.peopleOrder.map((person) => ({
+      person,
+      shifts: schedule.matrix.map((entry) => entry.shifts[person] ?? ''),
+    }));
+
+    return { dates, rows };
+  }, [schedule]);
+
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="border-b border-slate-200 bg-white shadow-sm">
@@ -243,9 +262,9 @@ export default function App() {
           ))}
         </section>
 
-        {schedule ? (
+        {scheduleView ? (
           <section
-            className="overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm"
+            className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm"
             aria-label="シフト表"
           >
             <table className="min-w-full border-collapse">
@@ -256,44 +275,41 @@ export default function App() {
                     scope="col"
                     className="sticky left-0 top-0 z-20 border-b border-r border-slate-200 bg-slate-100 px-4 py-3 text-left text-sm font-semibold text-slate-700"
                   >
-                    日付
+                    スタッフ
                   </th>
-                  {schedule.peopleOrder.map((person) => (
+                  {scheduleView.dates.map(({ key, label }) => (
                     <th
-                      key={person}
+                      key={key}
                       scope="col"
                       className="sticky top-0 z-10 border-b border-r border-slate-200 bg-slate-100 px-4 py-3 text-left text-sm font-semibold text-slate-700"
                     >
-                      {person}
+                      {label}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {schedule.matrix.map((entry, rowIndex) => {
-                  const formattedDate = formatDate(entry.date);
-                  return (
-                    <tr key={`${formattedDate}-${rowIndex}`} className="odd:bg-white even:bg-slate-50">
-                      <th
-                        scope="row"
-                        className="sticky left-0 z-10 border-r border-slate-200 bg-inherit px-4 py-3 text-left text-sm font-semibold text-slate-700"
-                      >
-                        {formattedDate}
-                      </th>
-                      {schedule.peopleOrder.map((person) => {
-                        const shift = entry.shifts[person] ?? '';
-                        return (
-                          <td
-                            key={`${formattedDate}-${person}`}
-                            className={`border-r border-slate-200 px-4 py-3 text-sm font-medium text-slate-800 ${nightShiftClass(shift)}`}
-                          >
-                            {shift || '休'}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
+                {scheduleView.rows.map(({ person, shifts }) => (
+                  <tr key={person} className="odd:bg-white even:bg-slate-50">
+                    <th
+                      scope="row"
+                      className="sticky left-0 z-10 border-r border-slate-200 bg-inherit px-4 py-3 text-left text-sm font-bold text-slate-700"
+                    >
+                      {person}
+                    </th>
+                    {shifts.map((shift, index) => {
+                      const { key } = scheduleView.dates[index];
+                      return (
+                        <td
+                          key={`${person}-${key}`}
+                          className={`border-r border-slate-200 px-4 py-3 text-sm font-medium text-slate-800 ${nightShiftClass(shift)}`}
+                        >
+                          {shift || '休'}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
               </tbody>
             </table>
           </section>
