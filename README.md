@@ -32,7 +32,19 @@ pip install -r solver/requirements.txt
 python solver/solver.py --in solver/sample_input.json --out solver/output.json
 ```
 
-## Frontend (出力JSONビューア)
+## Frontend
+Vite + React + TypeScript + Tailwind CSS 構成で、シフト条件の作成と solver 出力の閲覧を行います。
+
+### Config ページ（条件フォーム）
+`/config` でシフト条件を入力し、solver 用の `input.json` を生成できます。
+
+- スタッフの勤務可否・固定休・上限・最大連勤をテーブル形式で編集
+- ルール（noEarlyAfterDayAB / 夜勤明け休息日数）の編集
+- ローカル保存（localStorage）、保存データの読み込み
+- サンプル読込（`solver/sample_input_real.json` をベースにフォームへ反映）
+- JSON ダウンロード（入力した people / rules を差し込んだ `input.json`）
+
+### Viewer ページ（出力JSONビューア）
 OR-Tools の結果ファイル `solver/output.json` をローカルで読み込み、日付×スタッフのシフト表として確認できます。
 
 ### 起動手順
@@ -42,7 +54,9 @@ npm install
 npm run dev
 ```
 
-その後、ブラウザで [http://localhost:5173](http://localhost:5173) を開き、`solver/output.json` をドラッグ＆ドロップするか「JSONを読み込み」ボタンから選択してください。
+その後、ブラウザで [http://localhost:5173](http://localhost:5173) を開き、上部ナビゲーションから Viewer / Config を切り替えられます。
+Viewer ページでは `solver/output.json` をドラッグ＆ドロップするか「JSONを読み込み」ボタンから選択してください。
+Config ページでは条件を入力して「JSONダウンロード」で solver 入力を取得できます。
 
 ### サンプル読込の準備
 1. 最適化を実行して出力を生成します。
