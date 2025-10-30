@@ -1,4 +1,5 @@
-export type ShiftCode = 'EA' | 'DA' | 'DB' | 'LA' | 'NA' | 'NB' | 'NC';
+import type { ShiftCode } from '../constants/shifts';
+
 export type WeekdayJ = '月' | '火' | '水' | '木' | '金' | '土' | '日';
 
 export type Person = {

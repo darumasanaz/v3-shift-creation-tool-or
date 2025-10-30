@@ -20,6 +20,9 @@ type SummaryTotals = {
   [key: string]: number | undefined;
 };
 
+const AVAILABILITY_WARNING_MESSAGE = '需要があるのに割り当て可能なスタッフが0人のスロットがあります。';
+const INCONSISTENT_SUMMARY_MESSAGE = '需要があるのに不足=0です。コード不一致や可用性ゼロを確認してください。';
+
 type DemandDiagnosticsDay = {
   date?: number;
   total?: number;
@@ -53,11 +56,31 @@ type SolverErrorInfo = {
   details?: Record<string, unknown>;
 };
 
+type AvailabilitySlots = Record<string, number>;
+type AvailabilityMap = Record<string, AvailabilitySlots>;
+
+type AvailabilityWarningEntry = {
+  date?: number;
+  slot?: string;
+  need?: number;
+  available?: number;
+};
+
+type SolverDiagnostics = {
+  availability?: AvailabilityMap;
+  availabilityWarnings?: AvailabilityWarningEntry[];
+  warnings?: string[];
+  flags?: Record<string, unknown>;
+  var_counts?: Record<string, number>;
+  [key: string]: unknown;
+};
+
 type ScheduleData = {
   peopleOrder: string[];
   matrix: MatrixEntry[];
   summary?: Summary;
   error?: SolverErrorInfo | null;
+  diagnostics?: SolverDiagnostics;
 };
 
 const NIGHT_SHIFT_CODES = new Set(['NA', 'NB', 'NC']);
@@ -246,6 +269,87 @@ export default function ViewerPage() {
     }
     return messages;
   }, [demandDiagnostics, solverErrorMessage]);
+
+  const solverDiagnostics = schedule?.diagnostics ?? null;
+  const diagnosticsFlags = useMemo(() => {
+    const rawFlags = solverDiagnostics?.flags;
+    if (rawFlags && typeof rawFlags === 'object' && !Array.isArray(rawFlags)) {
+      return rawFlags as Record<string, unknown>;
+    }
+    return {} as Record<string, unknown>;
+  }, [solverDiagnostics]);
+
+  const inconsistentSummaryFlag = Boolean(diagnosticsFlags.inconsistent_summary);
+  const availabilityWarningFlag = Boolean(diagnosticsFlags.availability_warning);
+
+  const solverWarnings = useMemo(() => {
+    if (!solverDiagnostics || !Array.isArray(solverDiagnostics.warnings)) {
+      return [] as string[];
+    }
+    const messages = solverDiagnostics.warnings.filter(
+      (message): message is string => typeof message === 'string' && message.length > 0,
+    );
+    const unique = Array.from(new Set(messages));
+    if (inconsistentSummaryFlag) {
+      return unique.filter((message) => message !== INCONSISTENT_SUMMARY_MESSAGE);
+    }
+    return unique;
+  }, [solverDiagnostics, inconsistentSummaryFlag]);
+
+  const warningMessages = useMemo(() => {
+    const combined = [...demandWarnings, ...solverWarnings];
+    return Array.from(new Set(combined));
+  }, [demandWarnings, solverWarnings]);
+
+  const availabilityTable = useMemo(() => {
+    const availability = solverDiagnostics?.availability;
+    if (!availability || typeof availability !== 'object') {
+      return [] as { day: number; slots: Record<string, number>; total: number }[];
+    }
+    const entries: { day: number; slots: Record<string, number>; total: number }[] = [];
+    for (const [dayKey, rawSlots] of Object.entries(availability)) {
+      if (!rawSlots || typeof rawSlots !== 'object') continue;
+      const day = Number(dayKey);
+      if (!Number.isFinite(day)) continue;
+      const normalized: Record<string, number> = {};
+      for (const slot of DEMAND_SLOTS) {
+        const value = (rawSlots as Record<string, unknown>)[slot];
+        normalized[slot] = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+      }
+      const total = Object.values(normalized).reduce((sum, value) => sum + value, 0);
+      entries.push({ day, slots: normalized, total });
+    }
+    return entries.sort((a, b) => a.day - b.day);
+  }, [solverDiagnostics]);
+
+  const availabilityWarnings = useMemo(() => {
+    if (!solverDiagnostics || !Array.isArray(solverDiagnostics.availabilityWarnings)) {
+      return [] as { date: number; slot: string; need: number | null }[];
+    }
+    const entries = solverDiagnostics.availabilityWarnings
+      .map((entry) => {
+        const date = typeof entry?.date === 'number' ? entry.date : null;
+        const slot = typeof entry?.slot === 'string' ? entry.slot : null;
+        if (date === null || !slot) {
+          return null;
+        }
+        const need = typeof entry?.need === 'number' && Number.isFinite(entry.need) ? entry.need : null;
+        return { date, slot, need };
+      })
+      .filter((entry): entry is { date: number; slot: string; need: number | null } => entry !== null)
+      .sort((a, b) => a.date - b.date);
+    return entries;
+  }, [solverDiagnostics]);
+
+  const varCountEntries = useMemo(() => {
+    if (!solverDiagnostics || typeof solverDiagnostics.var_counts !== 'object' || !solverDiagnostics.var_counts) {
+      return [] as { key: string; value: number }[];
+    }
+    return Object.entries(solverDiagnostics.var_counts)
+      .filter(([, value]) => typeof value === 'number' && Number.isFinite(value))
+      .map(([key, value]) => ({ key, value }))
+      .sort((a, b) => a.key.localeCompare(b.key));
+  }, [solverDiagnostics]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -575,14 +679,23 @@ export default function ViewerPage() {
           </div>
         )}
 
-        {demandWarnings.length > 0 && (
+        {warningMessages.length > 0 && (
           <div
             className="space-y-1 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
             role="alert"
           >
-            {demandWarnings.map((message, index) => (
+            {warningMessages.map((message, index) => (
               <p key={`${message}-${index}`}>{message}</p>
             ))}
+          </div>
+        )}
+
+        {inconsistentSummaryFlag && (
+          <div
+            className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
+            role="alert"
+          >
+            {INCONSISTENT_SUMMARY_MESSAGE}
           </div>
         )}
 
@@ -694,6 +807,91 @@ export default function ViewerPage() {
                 </table>
               </div>
             )}
+          </section>
+        )}
+
+        {availabilityTable.length > 0 && (
+          <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm" aria-label="可用性診断">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">可用性診断</h2>
+              <p className="text-sm text-slate-500">
+                各日・各時間帯で勤務可能な人数を表示します。固定休や個別の不可日を考慮した概算です。
+              </p>
+            </div>
+            {availabilityWarningFlag && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800" role="alert">
+                <p>{AVAILABILITY_WARNING_MESSAGE}</p>
+              </div>
+            )}
+            {availabilityWarnings.length > 0 && (
+              <div className="rounded-md border border-amber-100 bg-amber-100 px-4 py-3 text-sm text-amber-900">
+                <p className="font-medium">可用性が 0 のスロット</p>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {availabilityWarnings.map(({ date, slot, need }) => (
+                    <li key={`availability-warning-${date}-${slot}`}>
+                      日 {date} / {slot}（需要 {need ?? 0}）
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div className="overflow-x-auto">
+              <table className="min-w-full border-collapse text-left text-sm">
+                <thead className="bg-slate-100">
+                  <tr>
+                    <th scope="col" className="border border-slate-200 px-3 py-2 font-semibold text-slate-700">
+                      日付
+                    </th>
+                    <th scope="col" className="border border-slate-200 px-3 py-2 font-semibold text-slate-700">
+                      合計
+                    </th>
+                    {DEMAND_SLOTS.map((slot) => (
+                      <th
+                        key={`availability-slot-${slot}`}
+                        scope="col"
+                        className="border border-slate-200 px-3 py-2 font-semibold text-slate-700"
+                      >
+                        {slot}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {availabilityTable.map(({ day, slots, total }) => (
+                    <tr key={`availability-day-${day}`} className="odd:bg-white even:bg-slate-50">
+                      <td className="border border-slate-200 px-3 py-2">{day}</td>
+                      <td className="border border-slate-200 px-3 py-2">{total}</td>
+                      {DEMAND_SLOTS.map((slot) => {
+                        const value = slots[slot] ?? 0;
+                        const cellClass = value === 0 ? 'text-red-600 font-semibold' : '';
+                        return (
+                          <td key={`availability-day-${day}-${slot}`} className={`border border-slate-200 px-3 py-2 ${cellClass}`}>
+                            {value}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {varCountEntries.length > 0 && (
+          <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-6 shadow-sm" aria-label="solver変数情報">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Solver 変数数</h2>
+              <p className="text-sm text-slate-500">主要な決定変数の個数です。0 の場合はモデル構築に失敗しています。</p>
+            </div>
+            <dl className="grid gap-2 text-sm text-slate-700 sm:grid-cols-2 lg:grid-cols-3">
+              {varCountEntries.map(({ key, value }) => (
+                <div key={`var-count-${key}`} className="flex items-center justify-between gap-3 rounded-md bg-slate-100 px-3 py-2">
+                  <dt className="font-medium text-slate-600">{key}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
           </section>
         )}
 

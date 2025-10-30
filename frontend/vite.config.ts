@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 const frontendDir = fileURLToPath(new URL('.', import.meta.url));
+const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 
 const solveApiPlugin = () => ({
   name: 'dev-solve-api',
@@ -85,5 +86,15 @@ const solveApiPlugin = () => ({
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react(), solveApiPlugin()],
-  server: { host: true, port: 5173, strictPort: true },
+  server: {
+    host: true,
+    port: 5173,
+    strictPort: true,
+    fs: { allow: [repoRoot] },
+  },
+  resolve: {
+    alias: {
+      '@solver': join(repoRoot, 'solver'),
+    },
+  },
 });

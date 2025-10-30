@@ -1,5 +1,6 @@
 import json, argparse
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Any
 from ortools.sat.python import cp_model
 
@@ -7,6 +8,72 @@ SLOTS = ["0-7", "7-9", "9-15", "16-18", "18-21", "21-23"]
 SUMMARY_SLOTS = ["7-9", "9-15", "16-18", "18-21", "21-23", "0-7"]
 
 NEED_TEMPLATE_SLOTS = ["7-9", "9-15", "16-18", "18-24", "0-7"]
+
+
+def _load_shift_catalog(path: Path) -> List[Dict[str, Any]]:
+    try:
+        raw = json.load(path.open("r", encoding="utf-8"))
+    except FileNotFoundError as error:
+        raise InputValidationError(
+            "Shift catalog file is missing.",
+            code="missing_shift_catalog",
+            details={"path": str(path)},
+        ) from error
+    except json.JSONDecodeError as error:
+        raise InputValidationError(
+            "Shift catalog could not be parsed.",
+            code="invalid_shift_catalog",
+            details={"path": str(path), "error": str(error)},
+        ) from error
+
+    if not isinstance(raw, list) or not raw:
+        raise InputValidationError(
+            "Shift catalog must be a non-empty array.",
+            code="invalid_shift_catalog",
+            details={"path": str(path)},
+        )
+
+    catalog = []
+    seen = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise InputValidationError(
+                "Shift catalog entries must be objects.",
+                code="invalid_shift_catalog_entry",
+                details={"path": str(path), "entry": entry},
+            )
+        code = entry.get("code")
+        start = entry.get("start")
+        end = entry.get("end")
+        name = entry.get("name")
+        if not isinstance(code, str) or not code:
+            raise InputValidationError(
+                "Shift catalog entries must include a non-empty code.",
+                code="invalid_shift_catalog_code",
+                details={"path": str(path), "entry": entry},
+            )
+        if code in seen:
+            raise InputValidationError(
+                "Shift catalog contains duplicate codes.",
+                code="duplicate_shift_code",
+                details={"path": str(path), "code": code},
+            )
+        seen.add(code)
+        if not isinstance(start, int) or not isinstance(end, int):
+            raise InputValidationError(
+                "Shift catalog entries must include integer start/end.",
+                code="invalid_shift_catalog_hours",
+                details={"path": str(path), "code": code},
+            )
+        catalog.append({"code": code, "name": name or code, "start": start, "end": end})
+    return catalog
+
+
+SHIFT_CATALOG_PATH = Path(__file__).with_name("shifts_catalog.json")
+SHIFT_CATALOG = _load_shift_catalog(SHIFT_CATALOG_PATH)
+SHIFT_BY_CODE = {entry["code"]: entry for entry in SHIFT_CATALOG}
+SHIFT_CODE_LIST = [entry["code"] for entry in SHIFT_CATALOG]
+SHIFT_CODES = set(SHIFT_CODE_LIST)
 
 
 class InputValidationError(Exception):
@@ -68,6 +135,167 @@ def get_weight(weights, keys, default):
 
 def overlap(start, end, a, b):
     return not (end <= a or b <= start)
+
+
+def ensure_shift_definitions(data: Dict[str, Any]):
+    data_shifts = data.get("shifts")
+    if not isinstance(data_shifts, list) or not data_shifts:
+        data["shifts"] = list(SHIFT_CATALOG)
+        return
+
+    provided_codes = set()
+    mismatched = []
+    unknown = []
+    for entry in data_shifts:
+        if not isinstance(entry, dict):
+            continue
+        code = entry.get("code")
+        if not isinstance(code, str):
+            continue
+        provided_codes.add(code)
+        catalog_entry = SHIFT_BY_CODE.get(code)
+        if catalog_entry is None:
+            unknown.append(code)
+            continue
+        start = entry.get("start")
+        end = entry.get("end")
+        if start != catalog_entry["start"] or end != catalog_entry["end"]:
+            mismatched.append(
+                {
+                    "code": code,
+                    "expected": {"start": catalog_entry["start"], "end": catalog_entry["end"]},
+                    "actual": {"start": start, "end": end},
+                }
+            )
+
+    missing = sorted(SHIFT_CODES - provided_codes)
+    if unknown or mismatched or missing:
+        raise InputValidationError(
+            "Shift definitions in input.json do not match the solver catalog.",
+            code="shift_definition_mismatch",
+            details={"unknown": unknown, "mismatched": mismatched, "missing": missing},
+        )
+
+    data["shifts"] = [dict(entry) for entry in SHIFT_CATALOG]
+
+
+def ensure_people_shift_codes(data: Dict[str, Any]):
+    invalid_people = []
+    people = data.get("people")
+    if not isinstance(people, list):
+        return
+
+    for index, person in enumerate(people):
+        if not isinstance(person, dict):
+            continue
+        can_work = person.get("canWork")
+        if not isinstance(can_work, list):
+            continue
+        invalid_codes = sorted({code for code in can_work if code not in SHIFT_CODES})
+        if invalid_codes:
+            pid = person.get("id")
+            invalid_people.append(
+                {
+                    "index": index,
+                    "staffId": pid if isinstance(pid, str) else None,
+                    "invalidCodes": invalid_codes,
+                }
+            )
+
+    if invalid_people:
+        raise InputValidationError(
+            "Some people reference unknown shift codes.",
+            code="unknown_shift_code",
+            details={"invalidPeople": invalid_people},
+        )
+
+
+def should_flag_summary_inconsistency(total_need: Any, total_assigned: Any, shortage_total: Any) -> bool:
+    try:
+        total_need_int = int(total_need)
+    except (TypeError, ValueError):
+        return False
+    try:
+        total_assigned_int = int(total_assigned)
+    except (TypeError, ValueError):
+        return False
+    try:
+        shortage_int = int(shortage_total)
+    except (TypeError, ValueError):
+        shortage_int = 0
+    if total_need_int <= 0:
+        return False
+    return total_assigned_int < total_need_int and shortage_int == 0
+
+
+def compute_slot_availability(data: Dict[str, Any]) -> Dict[int, Dict[str, int]]:
+    days = data.get("days")
+    if not isinstance(days, int) or days <= 0:
+        return {}
+    weekday0 = data.get("weekdayOfDay1", 0)
+    staff = data.get("people", [])
+    shifts = data.get("shifts", [])
+
+    fixed_map = {
+        "Sun": 0,
+        "Mon": 1,
+        "Tue": 2,
+        "Wed": 3,
+        "Thu": 4,
+        "Fri": 5,
+        "Sat": 6,
+        "日": 0,
+        "月": 1,
+        "火": 2,
+        "水": 3,
+        "木": 4,
+        "金": 5,
+        "土": 6,
+    }
+
+    def weekday_of(d: int) -> int:
+        return (weekday0 + (d - 1)) % 7
+
+    availability: Dict[int, Dict[str, int]] = {}
+    shift_entries = [entry for entry in shifts if isinstance(entry, dict) and entry.get("code") in SHIFT_CODES]
+
+    for d in range(1, days + 1):
+        slots = {}
+        wd = weekday_of(d)
+        for slot in SUMMARY_SLOTS:
+            count = 0
+            for person in staff:
+                if not isinstance(person, dict):
+                    continue
+                can_work = person.get("canWork", [])
+                if not isinstance(can_work, list):
+                    continue
+                can_codes = {code for code in can_work if code in SHIFT_CODES}
+                if not can_codes:
+                    continue
+                offs = person.get("fixedOffWeekdays", [])
+                if isinstance(offs, list):
+                    off_indices = {fixed_map.get(value, value) for value in offs}
+                else:
+                    off_indices = set()
+                try:
+                    off_indices = {int(value) for value in off_indices if isinstance(value, (int, str))}
+                except ValueError:
+                    off_indices = {int(value) for value in off_indices if isinstance(value, int)}
+                if wd in off_indices:
+                    continue
+                unavailable_days = sanitize_day_set(person.get("unavailableDates", []), days)
+                if d in unavailable_days:
+                    continue
+                if not any(
+                    shift.get("code") in can_codes and slot_contributes(shift, slot)
+                    for shift in shift_entries
+                ):
+                    continue
+                count += 1
+            slots[slot] = count
+        availability[d] = slots
+    return availability
 
 
 def _as_non_negative_int(value, *, default=0):
@@ -293,7 +521,9 @@ def build_validation_error_output(data, error: InputValidationError):
         "diagnostics": {},
     }
 
-    diagnostics = error.details.get("demandDiagnostics")
+    details = error.details if isinstance(error.details, dict) else {}
+
+    diagnostics = details.get("demandDiagnostics")
     if diagnostics:
         diagnostics = dict(diagnostics)
         warnings = list(diagnostics.get("warnings", []))
@@ -305,7 +535,7 @@ def build_validation_error_output(data, error: InputValidationError):
         summary["diagnostics"]["demand"] = diagnostics
         log_demand_diagnostics(diagnostics)
 
-    return {
+    output = {
         "assignments": [],
         "peopleOrder": ids,
         "matrix": [],
@@ -313,9 +543,15 @@ def build_validation_error_output(data, error: InputValidationError):
         "error": {
             "code": error.code,
             "message": error.message,
-            "details": error.details,
+            "details": details,
         },
     }
+
+    solver_diagnostics = details.get("solverDiagnostics")
+    if isinstance(solver_diagnostics, dict):
+        output.setdefault("diagnostics", {}).update(solver_diagnostics)
+
+    return output
 
 def parse_slot(slot_label):
     a, b = map(int, slot_label.split("-"))
@@ -448,50 +684,17 @@ def compute_summary(data, assignments, s_values):
 
 
 def estimate_slot_max_possible(data):
-    days = range(1, data["days"] + 1)
-    staff = data["people"]
-    shifts = data["shifts"]
-
-    fixed_map = {
-        "Sun": 0,
-        "Mon": 1,
-        "Tue": 2,
-        "Wed": 3,
-        "Thu": 4,
-        "Fri": 5,
-        "Sat": 6,
-        "日": 0,
-        "月": 1,
-        "火": 2,
-        "水": 3,
-        "木": 4,
-        "金": 5,
-        "土": 6,
-    }
-
-    def weekday_of(d):
-        return (data["weekdayOfDay1"] + (d - 1)) % 7
-
+    availability = compute_slot_availability(data)
     slot_capacity = {}
-    for d in days:
-        wd = weekday_of(d)
+    for day, slots in availability.items():
         for slot in SUMMARY_SLOTS:
-            count = 0
-            for person in staff:
-                offs = set(fixed_map.get(w, w) for w in person.get("fixedOffWeekdays", []))
-                if wd in offs:
-                    continue
-                can = set(person.get("canWork", []))
-                possible = any(
-                    shift["code"] in can and slot_contributes(shift, slot) for shift in shifts
-                )
-                if possible:
-                    count += 1
-            slot_capacity[(d, slot)] = count
+            slot_capacity[(day, slot)] = slots.get(slot, 0)
     return slot_capacity
 
 def solve(data, time_limit=10.0):
     try:
+        ensure_shift_definitions(data)
+        ensure_people_shift_codes(data)
         prepared = prepare_demand(data)
     except InputValidationError as error:
         return build_validation_error_output(data, error)
@@ -510,6 +713,68 @@ def solve(data, time_limit=10.0):
     rules = data.get("rules", {})
     I = range(len(staff))
     K = range(len(shifts))
+
+    availability_map = compute_slot_availability(data)
+    availability_output = {
+        str(day): {slot: int(value) for slot, value in (slots or {}).items()}
+        for day, slots in availability_map.items()
+    }
+    solver_diagnostics: Dict[str, Any] = {"availability": availability_output}
+    diagnostics_flags: Dict[str, bool] = {}
+    solver_warnings: List[str] = []
+
+    per_day_totals = prepared.diagnostics.get("perDayTotals") or []
+    needs_lookup: Dict[int, Dict[str, int]] = {}
+    for entry in per_day_totals:
+        if not isinstance(entry, dict):
+            continue
+        day = entry.get("date")
+        if not isinstance(day, int):
+            continue
+        slots = entry.get("slots") or {}
+        needs_lookup[day] = {slot: int(slots.get(slot, 0) or 0) for slot in SUMMARY_SLOTS}
+
+    total_need = int(prepared.diagnostics.get("totalNeed", 0) or 0)
+    availability_warnings: List[Dict[str, Any]] = []
+    all_slots_zero = True
+    for day in range(1, days_count + 1):
+        slots = availability_map.get(day, {})
+        if any(int(slots.get(slot, 0) or 0) > 0 for slot in SUMMARY_SLOTS):
+            all_slots_zero = False
+        for slot in SUMMARY_SLOTS:
+            need = needs_lookup.get(day, {}).get(slot, 0)
+            available = int(slots.get(slot, 0) or 0)
+            if need > 0 and available == 0:
+                availability_warnings.append(
+                    {"date": day, "slot": slot, "need": int(need), "available": int(available)}
+                )
+
+    if all_slots_zero and total_need > 0:
+        details = {
+            "solverDiagnostics": {
+                **solver_diagnostics,
+                "availabilityWarnings": availability_warnings,
+            },
+            "demandDiagnostics": prepared.diagnostics,
+        }
+        raise_error = InputValidationError(
+            "No staff can be assigned to any slot despite positive demand.",
+            code="no_availability",
+            details=details,
+        )
+        return build_validation_error_output(data, raise_error)
+
+    if availability_warnings:
+        diagnostics_flags["availability_warning"] = True
+        solver_warnings.append(
+            "需要があるのに割り当て可能なスタッフが0人のスロットがあります。"
+        )
+    if diagnostics_flags:
+        solver_diagnostics["flags"] = diagnostics_flags
+    if solver_warnings:
+        solver_diagnostics["warnings"] = solver_warnings
+    if availability_warnings:
+        solver_diagnostics["availabilityWarnings"] = availability_warnings
 
     weights = data.get("weights", {})
     if not isinstance(weights, dict):
@@ -537,6 +802,21 @@ def solve(data, time_limit=10.0):
     # decision vars
     x = {(d,i,k): m.NewBoolVar(f"x_d{d}_i{i}_k{k}") for d in days for i in I for k in K}
     work = {(d,i): m.NewBoolVar(f"work_d{d}_i{i}") for d in days for i in I}
+
+    var_counts = {"x": len(x)}
+    solver_diagnostics["var_counts"] = var_counts
+    if var_counts["x"] == 0:
+        details = {
+            "varCounts": var_counts,
+            "solverDiagnostics": solver_diagnostics,
+            "demandDiagnostics": prepared.diagnostics,
+        }
+        raise_error = InputValidationError(
+            "No assignment variables were created. Staff availability is zero.",
+            code="no_assignment_variables",
+            details=details,
+        )
+        return build_validation_error_output(data, raise_error)
 
     # 1) 1日1勤務 & work定義
     for d in days:
@@ -747,7 +1027,21 @@ def solve(data, time_limit=10.0):
                             "shift": shifts[k]["code"]
                         })
         out["summary"] = compute_summary(data, out["assignments"], s_values)
-        out["summary"].setdefault("diagnostics", {})["demand"] = prepared.diagnostics
+        summary = out["summary"]
+        summary.setdefault("diagnostics", {})["demand"] = prepared.diagnostics
+        totals = summary.setdefault("totals", {})
+        totals["assigned"] = len(out["assignments"])
+        totals.setdefault("totalNeed", total_need)
+
+        shortage_total = totals.get("shortage", 0)
+        if should_flag_summary_inconsistency(total_need, totals.get("assigned"), shortage_total):
+            diagnostics_flags["inconsistent_summary"] = True
+            summary.setdefault("diagnostics", {}).setdefault("warnings", []).append(
+                "summary.totals.shortage が0ですが、割当が需要を満たしていません。"
+            )
+            solver_warnings.append(
+                "需要があるのに不足=0です。コード不一致や可用性ゼロを確認してください。"
+            )
     else:
         out["infeasible"] = True
         slot_caps = estimate_slot_max_possible(data)
@@ -884,7 +1178,7 @@ def solve(data, time_limit=10.0):
             sum(max(0, entry.get("missing", 0)) for entry in wish_off_conflict_entries)
         )
 
-        out["diagnostics"] = {"unmetCandidates": diagnostics}
+        out.setdefault("diagnostics", {})["unmetCandidates"] = diagnostics
         summary = out.setdefault(
             "summary",
             {
@@ -924,6 +1218,13 @@ def solve(data, time_limit=10.0):
                 row[pid] = shift
     out["peopleOrder"] = ids
     out["matrix"] = matrix_rows
+    if diagnostics_flags:
+        solver_diagnostics["flags"] = diagnostics_flags
+    if solver_warnings:
+        solver_diagnostics["warnings"] = solver_warnings
+    if availability_warnings:
+        solver_diagnostics["availabilityWarnings"] = availability_warnings
+    out.setdefault("diagnostics", {}).update(solver_diagnostics)
     return out
 
 def main():
