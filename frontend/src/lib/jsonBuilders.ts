@@ -1,4 +1,5 @@
-import { FormState, Person, Rules, ShiftCode, WeekdayJ, WishOffs } from '../types/config';
+import { SHIFT_CATALOG, ShiftCode } from '../constants/shifts';
+import { FormState, Person, Rules, WeekdayJ, WishOffs } from '../types/config';
 import { sanitizeWishOffs } from './wishOffs';
 
 type SolverPerson = Person & {
@@ -73,6 +74,7 @@ export const buildSolverInput = (
 
   return {
     ...rest,
+    shifts: SHIFT_CATALOG.map((shift) => ({ ...shift })),
     people: form.people.map(normalizePerson),
     rules: normalizeRules(form.rules),
     weights,

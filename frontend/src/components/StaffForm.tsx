@@ -1,14 +1,7 @@
-import { Person, ShiftCode, WeekdayJ } from '../types/config';
+import { SHIFT_SELECT_OPTIONS, ShiftCode } from '../constants/shifts';
+import { Person, WeekdayJ } from '../types/config';
 
-const SHIFT_OPTIONS: { value: ShiftCode; label: string }[] = [
-  { value: 'EA', label: 'EA' },
-  { value: 'DA', label: 'DA' },
-  { value: 'DB', label: 'DB' },
-  { value: 'LA', label: 'LA' },
-  { value: 'NA', label: 'NA' },
-  { value: 'NB', label: 'NB' },
-  { value: 'NC', label: 'NC' },
-];
+const SHIFT_OPTIONS: { value: ShiftCode; label: string }[] = SHIFT_SELECT_OPTIONS;
 
 const WEEKDAY_OPTIONS: { value: WeekdayJ; label: string }[] = [
   { value: '月', label: '月' },

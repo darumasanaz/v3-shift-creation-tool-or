@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { StaffForm } from '../components/StaffForm';
+import { SHIFT_CODES, SHIFT_CODE_SET, ShiftCode } from '../constants/shifts';
 import { buildSolverInput, deserializePeople, deserializeRules } from '../lib/jsonBuilders';
 import {
   CONFIG_STORAGE_KEY,
@@ -9,13 +10,11 @@ import {
 } from '../lib/storageKeys';
 import { requestSolve, SolveError, isSolveAvailable } from '../lib/solveClient';
 import { loadWishOffsFromStorage } from '../lib/wishOffs';
-import { FormState, Person, Rules, ShiftCode, WeekdayJ } from '../types/config';
+import { FormState, Person, Rules, WeekdayJ } from '../types/config';
 const SAMPLE_PATH = '/sample_input_real.json';
 
-const SHIFT_CODES: ShiftCode[] = ['EA', 'DA', 'DB', 'LA', 'NA', 'NB', 'NC'];
 const WEEKDAY_CODES: WeekdayJ[] = ['月', '火', '水', '木', '金', '土', '日'];
 
-const SHIFT_CODE_SET = new Set<string>(SHIFT_CODES);
 const WEEKDAY_SET = new Set<string>(WEEKDAY_CODES);
 
 const DEFAULT_RULES: Rules = {
