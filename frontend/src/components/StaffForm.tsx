@@ -1,4 +1,3 @@
-import { ChangeEvent } from 'react';
 import { Person, ShiftCode, WeekdayJ } from '../types/config';
 
 const SHIFT_OPTIONS: { value: ShiftCode; label: string }[] = [
@@ -25,8 +24,10 @@ const newPerson = (): Person => ({
   id: '',
   canWork: [],
   fixedOffWeekdays: [],
-  weeklyMax: undefined,
-  monthlyMax: undefined,
+  weeklyMin: 0,
+  weeklyMax: 0,
+  monthlyMin: 0,
+  monthlyMax: 0,
   consecMax: 5,
 });
 
@@ -35,14 +36,98 @@ type StaffFormProps = {
   onChange: (people: Person[]) => void;
 };
 
-const getSelectedValues = <T extends string>(event: ChangeEvent<HTMLSelectElement>) =>
-  Array.from(event.target.selectedOptions).map((option) => option.value as T);
-
 const parseNumberInput = (value: string): number | undefined => {
   if (value.trim() === '') return undefined;
   const parsed = Number(value);
   return Number.isNaN(parsed) ? undefined : parsed;
 };
+
+const parseNumberOrZero = (value: string): number => {
+  if (value.trim() === '') return 0;
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+type MultiSelectOption<T extends string> = {
+  value: T;
+  label: string;
+};
+
+type MultiSelectChipsProps<T extends string> = {
+  options: MultiSelectOption<T>[];
+  selected: T[];
+  onChange: (values: T[]) => void;
+  name: string;
+};
+
+function MultiSelectChips<T extends string>({ options, selected, onChange, name }: MultiSelectChipsProps<T>) {
+  const orderIndex = new Map(options.map((option, index) => [option.value, index] as const));
+
+  const sortedSelected = [...selected].sort(
+    (a, b) => (orderIndex.get(a) ?? Number.POSITIVE_INFINITY) - (orderIndex.get(b) ?? Number.POSITIVE_INFINITY),
+  );
+
+  const toggleValue = (value: T) => {
+    if (selected.includes(value)) {
+      onChange(selected.filter((item) => item !== value));
+      return;
+    }
+    const next = [...selected, value];
+    next.sort(
+      (a, b) => (orderIndex.get(a) ?? Number.POSITIVE_INFINITY) - (orderIndex.get(b) ?? Number.POSITIVE_INFINITY),
+    );
+    onChange(next);
+  };
+
+  const optionLabel = (value: T) => options.find((option) => option.value === value)?.label ?? value;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-2">
+        {sortedSelected.length === 0 ? (
+          <span className="text-xs text-slate-400">未選択</span>
+        ) : (
+          sortedSelected.map((value) => {
+            const label = optionLabel(value);
+            return (
+              <span
+                key={value}
+                className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800"
+              >
+                {label}
+                <button
+                  type="button"
+                  onClick={() => toggleValue(value)}
+                  className="rounded-full p-0.5 text-indigo-700 hover:bg-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  aria-label={`${label} を削除`}
+                >
+                  ×
+                </button>
+              </span>
+            );
+          })
+        )}
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-sm">
+        {options.map(({ value, label }) => {
+          const id = `${name}-${value}`;
+          return (
+            <label key={value} htmlFor={id} className="flex items-center gap-2 rounded-md border border-slate-200 px-2 py-1">
+              <input
+                id={id}
+                type="checkbox"
+                checked={selected.includes(value)}
+                onChange={() => toggleValue(value)}
+                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              <span>{label}</span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export function StaffForm({ people, onChange }: StaffFormProps) {
   const updatePerson = (index: number, changes: Partial<Person>) => {
@@ -72,8 +157,8 @@ export function StaffForm({ people, onChange }: StaffFormProps) {
               <th className="sticky left-0 z-10 border border-slate-200 bg-slate-100 px-4 py-3">名前 (ID)</th>
               <th className="border border-slate-200 px-4 py-3">勤務可シフト</th>
               <th className="border border-slate-200 px-4 py-3">固定休</th>
-              <th className="border border-slate-200 px-4 py-3">週上限</th>
-              <th className="border border-slate-200 px-4 py-3">月上限</th>
+              <th className="border border-slate-200 px-4 py-3">週 下限 / 上限</th>
+              <th className="border border-slate-200 px-4 py-3">月 下限 / 上限</th>
               <th className="border border-slate-200 px-4 py-3">最大連勤</th>
               <th className="w-24 border border-slate-200 px-4 py-3">操作</th>
             </tr>
@@ -91,54 +176,66 @@ export function StaffForm({ people, onChange }: StaffFormProps) {
                   />
                 </td>
                 <td className="border border-slate-200 px-4 py-3 align-top">
-                  <select
-                    multiple
-                    value={person.canWork}
-                    onChange={(event) => updatePerson(index, { canWork: getSelectedValues<ShiftCode>(event) })}
-                    className="h-24 w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                  >
-                    {SHIFT_OPTIONS.map(({ value, label }) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td className="border border-slate-200 px-4 py-3 align-top">
-                  <select
-                    multiple
-                    value={person.fixedOffWeekdays}
-                    onChange={(event) =>
-                      updatePerson(index, { fixedOffWeekdays: getSelectedValues<WeekdayJ>(event) })
-                    }
-                    className="h-24 w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                  >
-                    {WEEKDAY_OPTIONS.map(({ value, label }) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td className="border border-slate-200 px-4 py-3 align-top">
-                  <input
-                    type="number"
-                    min={0}
-                    className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                    value={person.weeklyMax ?? ''}
-                    onChange={(event) => updatePerson(index, { weeklyMax: parseNumberInput(event.target.value) })}
-                    placeholder="無制限"
+                  <MultiSelectChips<ShiftCode>
+                    options={SHIFT_OPTIONS}
+                    selected={person.canWork}
+                    onChange={(values) => updatePerson(index, { canWork: values })}
+                    name={`canWork-${index}`}
                   />
                 </td>
                 <td className="border border-slate-200 px-4 py-3 align-top">
-                  <input
-                    type="number"
-                    min={0}
-                    className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                    value={person.monthlyMax ?? ''}
-                    onChange={(event) => updatePerson(index, { monthlyMax: parseNumberInput(event.target.value) })}
-                    placeholder="無制限"
+                  <MultiSelectChips<WeekdayJ>
+                    options={WEEKDAY_OPTIONS}
+                    selected={person.fixedOffWeekdays}
+                    onChange={(values) => updatePerson(index, { fixedOffWeekdays: values })}
+                    name={`fixedOff-${index}`}
                   />
+                </td>
+                <td className="border border-slate-200 px-4 py-3 align-top">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                      value={person.weeklyMin ?? 0}
+                      onChange={(event) => updatePerson(index, { weeklyMin: parseNumberOrZero(event.target.value) })}
+                      placeholder="下限..."
+                      aria-label="週の下限"
+                    />
+                    <span className="text-xs text-slate-400">/</span>
+                    <input
+                      type="number"
+                      min={0}
+                      className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                      value={person.weeklyMax ?? 0}
+                      onChange={(event) => updatePerson(index, { weeklyMax: parseNumberOrZero(event.target.value) })}
+                      placeholder="上限..."
+                      aria-label="週の上限"
+                    />
+                  </div>
+                </td>
+                <td className="border border-slate-200 px-4 py-3 align-top">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                      value={person.monthlyMin ?? 0}
+                      onChange={(event) => updatePerson(index, { monthlyMin: parseNumberOrZero(event.target.value) })}
+                      placeholder="下限..."
+                      aria-label="月の下限"
+                    />
+                    <span className="text-xs text-slate-400">/</span>
+                    <input
+                      type="number"
+                      min={0}
+                      className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                      value={person.monthlyMax ?? 0}
+                      onChange={(event) => updatePerson(index, { monthlyMax: parseNumberOrZero(event.target.value) })}
+                      placeholder="上限..."
+                      aria-label="月の上限"
+                    />
+                  </div>
                 </td>
                 <td className="border border-slate-200 px-4 py-3 align-top">
                   <input

@@ -2,9 +2,9 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { StaffForm } from '../components/StaffForm';
 import { buildSolverInput, deserializePeople, deserializeRules } from '../lib/jsonBuilders';
+import { CONFIG_STORAGE_KEY } from '../lib/storageKeys';
+import { loadWishOffsFromStorage } from '../lib/wishOffs';
 import { FormState, Person, Rules, ShiftCode, WeekdayJ } from '../types/config';
-
-const LOCAL_STORAGE_KEY = 'shift-config-v1';
 const SAMPLE_PATH = '/sample_input_real.json';
 
 const SHIFT_CODES: ShiftCode[] = ['EA', 'DA', 'DB', 'LA', 'NA', 'NB', 'NC'];
@@ -46,8 +46,10 @@ const sanitizePerson = (value: unknown): Person => {
     id: typeof raw.id === 'string' ? raw.id : '',
     canWork: sanitizeStringArray<ShiftCode>(raw.canWork, SHIFT_CODE_SET),
     fixedOffWeekdays: sanitizeStringArray<WeekdayJ>(raw.fixedOffWeekdays, WEEKDAY_SET),
-    weeklyMax: sanitizeNumber(raw.weeklyMax),
-    monthlyMax: sanitizeNumber(raw.monthlyMax),
+    weeklyMin: sanitizeNumber(raw.weeklyMin) ?? 0,
+    weeklyMax: sanitizeNumber(raw.weeklyMax) ?? 0,
+    monthlyMin: sanitizeNumber(raw.monthlyMin) ?? 0,
+    monthlyMax: sanitizeNumber(raw.monthlyMax) ?? 0,
     consecMax: sanitizeNumber(raw.consecMax),
   };
 };
@@ -97,7 +99,7 @@ export default function ConfigPage() {
     const fromStorage = () => {
       if (typeof window === 'undefined') return;
       try {
-        const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
+        const raw = window.localStorage.getItem(CONFIG_STORAGE_KEY);
         if (!raw) return;
         const parsed = JSON.parse(raw);
         setFormState(sanitizeFormState(parsed));
@@ -154,7 +156,7 @@ export default function ConfigPage() {
   const handleSave = () => {
     try {
       if (typeof window === 'undefined') return;
-      window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(formState));
+      window.localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(formState));
       setStatus('ローカルに保存しました');
       setError(null);
     } catch (err) {
@@ -167,7 +169,7 @@ export default function ConfigPage() {
   const handleLoad = () => {
     if (typeof window === 'undefined') return;
     try {
-      const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
+      const raw = window.localStorage.getItem(CONFIG_STORAGE_KEY);
       if (!raw) {
         setStatus('保存されたデータはありません');
         setError(null);
@@ -216,7 +218,8 @@ export default function ConfigPage() {
       setError('サンプルテンプレートの取得を待っています');
       return;
     }
-    const json = buildSolverInput(template, formState);
+    const wishOffs = loadWishOffsFromStorage();
+    const json = buildSolverInput(template, formState, { wishOffs });
     downloadJson(json, 'input.json');
     setStatus('input.json をダウンロードしました');
     setError(null);
@@ -239,6 +242,9 @@ export default function ConfigPage() {
               </NavLink>
               <NavLink to="/config" className={navLinkClass}>
                 Config
+              </NavLink>
+              <NavLink to="/wish-offs" className={navLinkClass}>
+                WishOffs
               </NavLink>
             </nav>
           </div>

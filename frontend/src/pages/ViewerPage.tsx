@@ -35,7 +35,7 @@ type SummaryCard = {
 const SUMMARY_CARDS: SummaryCard[] = [
   { key: 'shortage', label: '不足' },
   { key: 'excess', label: '過剰' },
-  { key: 'violatedPreferences', label: '希望休違反' },
+  { key: 'wishOffViolations', label: '希望休違反' },
 ];
 
 function formatDate(value: MatrixEntry['date']): string {
@@ -201,6 +201,9 @@ export default function ViewerPage() {
               </NavLink>
               <NavLink to="/config" className={navLinkClass}>
                 Config
+              </NavLink>
+              <NavLink to="/wish-offs" className={navLinkClass}>
+                WishOffs
               </NavLink>
             </nav>
           </div>

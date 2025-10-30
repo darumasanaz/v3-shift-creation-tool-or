@@ -5,6 +5,46 @@ SLOTS = ["0-7", "7-9", "9-15", "16-18", "18-21", "21-23"]
 SUMMARY_SLOTS = ["7-9", "9-15", "16-18", "18-21", "21-23", "0-7"]
 
 
+def sanitize_day_set(values, day_limit=None):
+    if not isinstance(values, (list, tuple, set)):
+        return set()
+    result = set()
+    for value in values:
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)):
+            day = int(value)
+        else:
+            try:
+                day = int(value)
+            except (TypeError, ValueError):
+                continue
+        if day < 1:
+            continue
+        if day_limit is not None and day > day_limit:
+            continue
+        result.add(day)
+    return result
+
+
+def normalize_limit(value):
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return 0
+    if limit < 0:
+        return 0
+    return limit
+
+
+def get_weight(weights, keys, default):
+    for key in keys:
+        value = weights.get(key)
+        if isinstance(value, (int, float)):
+            return value
+    return default
+
+
 def overlap(start, end, a, b):
     return not (end <= a or b <= start)
 
@@ -41,12 +81,31 @@ def compute_summary(data, assignments, s_values):
     summary = {
         "shortage": [],
         "overstaff": [],
-        "totals": {"shortage": 0, "overstaff": 0, "requestedOffViolations": 0},
+        "totals": {
+            "shortage": 0,
+            "overstaff": 0,
+            "wishOffViolations": 0,
+            "requestedOffViolations": 0,
+            "violatedPreferences": 0,
+        },
+        "diagnostics": {},
     }
-    requested_off_map = {
-        person.get("id"): set(person.get("requestedOffDates", []))
-        for person in data.get("people", [])
-    }
+    requested_off_map = {}
+
+    wish_offs_raw = data.get("wishOffs", {})
+    day_limit = data.get("days")
+    if isinstance(wish_offs_raw, dict):
+        for staff_id, days in wish_offs_raw.items():
+            if isinstance(staff_id, str):
+                requested_off_map[staff_id] = sanitize_day_set(days, day_limit)
+
+    for person in data.get("people", []):
+        staff_id = person.get("id")
+        if not isinstance(staff_id, str):
+            continue
+        extra = sanitize_day_set(person.get("requestedOffDates", []), day_limit)
+        if extra:
+            requested_off_map.setdefault(staff_id, set()).update(extra)
 
     def add_shortage(date, slot, lack):
         summary["shortage"].append({"date": date, "slot": slot, "lack": int(lack)})
@@ -112,8 +171,10 @@ def compute_summary(data, assignments, s_values):
         staff_id = assignment.get("staffId")
         date = assignment.get("date")
         if date in requested_off_map.get(staff_id, set()):
+            summary["totals"]["wishOffViolations"] += 1
             summary["totals"]["requestedOffViolations"] += 1
 
+    summary["totals"]["violatedPreferences"] = summary["totals"]["wishOffViolations"]
     return summary
 
 
@@ -161,12 +222,34 @@ def estimate_slot_max_possible(data):
     return slot_capacity
 
 def solve(data, time_limit=10.0):
-    days = range(1, data["days"]+1)
+    days_count = int(data["days"])
+    days = range(1, days_count + 1)
     staff = data["people"]
     shifts = data["shifts"]
     rules = data.get("rules", {})
     I = range(len(staff))
     K = range(len(shifts))
+
+    weights = data.get("weights", {})
+    if not isinstance(weights, dict):
+        weights = {}
+
+    raw_wish_offs = data.get("wishOffs", {})
+    sanitized_wish_offs = {}
+    if isinstance(raw_wish_offs, dict):
+        for staff_id, values in raw_wish_offs.items():
+            if isinstance(staff_id, str):
+                sanitized_wish_offs[staff_id] = sorted(sanitize_day_set(values, days_count))
+    data["wishOffs"] = sanitized_wish_offs
+
+    combined_wish_off_sets = {pid: set(days_list) for pid, days_list in sanitized_wish_offs.items()}
+    for person in staff:
+        pid = person.get("id")
+        if not isinstance(pid, str):
+            continue
+        extra = sanitize_day_set(person.get("requestedOffDates", []), days_count)
+        if extra:
+            combined_wish_off_sets.setdefault(pid, set()).update(extra)
 
     m = cp_model.CpModel()
 
@@ -197,30 +280,43 @@ def solve(data, time_limit=10.0):
     def weekday_of(d):
         return (data["weekdayOfDay1"] + (d-1)) % 7
 
+    fixed_off_cache = []
+    unavailable_cache = []
+    for p in staff:
+        offs = set(fixed_map.get(w, w) for w in p.get("fixedOffWeekdays", []))
+        fixed_off_cache.append(offs)
+        unavailable_cache.append(sanitize_day_set(p.get("unavailableDates", []), days_count))
+
     for d in days:
         wd = weekday_of(d)
-        for i, p in enumerate(staff):
-            offs = set(fixed_map.get(w, w) for w in p.get("fixedOffWeekdays",[]))
-            if wd in offs:
+        for i in I:
+            if wd in fixed_off_cache[i]:
                 m.Add(sum(x[d,i,k] for k in K) == 0)
 
     # 3b) 週上限
     weeks = split_weeks(data["days"], data["weekdayOfDay1"])
     for i, p in enumerate(staff):
-        wmax = p.get("weeklyMax", 0)
-        if wmax and wmax > 0:
-            for a, b in weeks:
-                m.Add(sum(work[d, i] for d in range(a, b + 1)) <= wmax)
+        wmax = normalize_limit(p.get("weeklyMax", 0))
+        wmin = normalize_limit(p.get("weeklyMin", 0))
+        for a, b in weeks:
+            week_days = [d for d in range(a, b + 1) if 1 <= d <= days_count]
+            if wmax > 0:
+                m.Add(sum(work[d, i] for d in week_days) <= wmax)
+            if wmin > 0:
+                m.Add(sum(work[d, i] for d in week_days) >= wmin)
 
     # 3c) 月間上限
     for i, p in enumerate(staff):
-        mmax = p.get("monthlyMax", 0)
-        if mmax and mmax > 0:
+        mmax = normalize_limit(p.get("monthlyMax", 0))
+        mmin = normalize_limit(p.get("monthlyMin", 0))
+        if mmax > 0:
             m.Add(sum(work[d, i] for d in days) <= mmax)
+        if mmin > 0:
+            m.Add(sum(work[d, i] for d in days) >= mmin)
 
     # 3d) 特定日NG
-    for i, p in enumerate(staff):
-        unavailable = set(p.get("unavailableDates", []))
+    for i in I:
+        unavailable = unavailable_cache[i]
         for d in days:
             if d in unavailable:
                 m.Add(sum(x[d, i, k] for k in K) == 0)
@@ -246,8 +342,8 @@ def solve(data, time_limit=10.0):
 
     # 5) 最大連勤
     for i, p in enumerate(staff):
-        L = p.get("consecMax", 5)
-        if L <= 0: 
+        L = normalize_limit(p.get("consecMax", 5))
+        if L <= 0:
             continue
         for start in days:
             window = [t for t in range(start, start+L+1) if t in days]
@@ -275,9 +371,10 @@ def solve(data, time_limit=10.0):
             ))
 
     # 7) 夜間需要（不足はペナルティで吸収）
-    weights = data["weights"]
     penalties = []
-    shortage_weight = weights.get("W_shortage", 1000)
+    shortage_weight = get_weight(weights, ["w_shortage", "W_shortage"], 1000)
+    overstaff_weight = get_weight(weights, ["w_overstaff_gt_need_plus1", "W_overstaff_gt_need_plus1"], 5)
+    wish_off_weight_default = get_weight(weights, ["w_wish_off_violation", "W_requested_off_violation"], 20)
 
     for d in days:
         dayType = data["dayTypeByDate"][d - 1]
@@ -317,18 +414,22 @@ def solve(data, time_limit=10.0):
 
     # 8) 日中下限 + 9) need+1超の過剰ペナルティ
 
-    default_requested_weight = weights.get("W_requested_off_violation", 20)
     for i, p in enumerate(staff):
-        requested = set(p.get("requestedOffDates", []))
+        pid = p.get("id")
+        if not isinstance(pid, str):
+            continue
+        requested = combined_wish_off_sets.get(pid, set())
         if not requested:
             continue
-        weight = p.get("requestedOffWeight", default_requested_weight)
+        personal_weight = p.get("requestedOffWeight")
+        weight = wish_off_weight_default
+        if isinstance(personal_weight, (int, float)):
+            weight = personal_weight
+        if weight <= 0:
+            continue
         for d in requested:
-            if d in days:
-                viol = m.NewBoolVar(f"requested_off_violation_d{d}_i{i}")
-                m.Add(viol >= work[d, i])
-                m.Add(viol <= work[d, i])
-                penalties.append(weight * viol)
+            if 1 <= d <= days_count:
+                penalties.append(weight * work[d, i])
 
     for d in days:
         dayType = data["dayTypeByDate"][d-1]
@@ -342,7 +443,8 @@ def solve(data, time_limit=10.0):
             ex = m.NewIntVar(0, bigN, f"ex_d{d}_{slot}")
             m.Add(ex >= s[d, slot] - (need + 1))
             m.Add(ex >= 0)
-            penalties.append(weights["W_overstaff_gt_need_plus1"] * ex)
+            if overstaff_weight:
+                penalties.append(overstaff_weight * ex)
 
     # 目的関数
     m.Minimize(sum(penalties))
@@ -399,14 +501,131 @@ def solve(data, time_limit=10.0):
                 print(
                     f"[diagnostic] day {item['date']} slot {item['slot']}: need {item['need']} maxPossible {item['maxPossible']}"
                 )
+        weekly_diagnostics = []
+        monthly_diagnostics = []
+        wish_off_conflict_entries = []
+
+        for i, p in enumerate(staff):
+            pid = p.get("id")
+            if not isinstance(pid, str):
+                continue
+            wmin = normalize_limit(p.get("weeklyMin", 0))
+            wmax = normalize_limit(p.get("weeklyMax", 0))
+            mmin = normalize_limit(p.get("monthlyMin", 0))
+            mmax = normalize_limit(p.get("monthlyMax", 0))
+            if wmax and wmin and wmin > wmax:
+                weekly_diagnostics.append(
+                    {
+                        "type": "weekly_min_exceeds_max",
+                        "staffId": pid,
+                        "min": int(wmin),
+                        "max": int(wmax),
+                    }
+                )
+            if mmax and mmin and mmin > mmax:
+                monthly_diagnostics.append(
+                    {
+                        "type": "monthly_min_exceeds_max",
+                        "staffId": pid,
+                        "min": int(mmin),
+                        "max": int(mmax),
+                    }
+                )
+
+            wish_set = combined_wish_off_sets.get(pid, set())
+            monthly_available = 0
+            monthly_available_no_wish = 0
+
+            for a, b in weeks:
+                week_days = [d for d in range(a, b + 1) if 1 <= d <= days_count]
+                available = 0
+                available_no_wish = 0
+                for d in week_days:
+                    if d in unavailable_cache[i]:
+                        continue
+                    if weekday_of(d) in fixed_off_cache[i]:
+                        continue
+                    if not can_cache[i]:
+                        continue
+                    available += 1
+                    if d not in wish_set:
+                        available_no_wish += 1
+                monthly_available += available
+                monthly_available_no_wish += available_no_wish
+                if wmin and available < wmin:
+                    weekly_diagnostics.append(
+                        {
+                            "type": "weekly_min_shortage",
+                            "staffId": pid,
+                            "weekStart": a,
+                            "weekEnd": b,
+                            "min": int(wmin),
+                            "available": int(available),
+                        }
+                    )
+                if wmin and available_no_wish < wmin:
+                    missing = max(0, wmin - available_no_wish)
+                    wish_off_conflict_entries.append(
+                        {
+                            "scope": "weekly",
+                            "staffId": pid,
+                            "weekStart": a,
+                            "weekEnd": b,
+                            "min": int(wmin),
+                            "availableExcludingWishOff": int(available_no_wish),
+                            "missing": int(missing),
+                        }
+                    )
+
+            if mmin and monthly_available < mmin:
+                monthly_diagnostics.append(
+                    {
+                        "type": "monthly_min_shortage",
+                        "staffId": pid,
+                        "min": int(mmin),
+                        "available": int(monthly_available),
+                    }
+                )
+            if mmin and monthly_available_no_wish < mmin:
+                missing = max(0, mmin - monthly_available_no_wish)
+                wish_off_conflict_entries.append(
+                    {
+                        "scope": "monthly",
+                        "staffId": pid,
+                        "min": int(mmin),
+                        "availableExcludingWishOff": int(monthly_available_no_wish),
+                        "missing": int(missing),
+                    }
+                )
+
+        wish_off_conflict_count = int(
+            sum(max(0, entry.get("missing", 0)) for entry in wish_off_conflict_entries)
+        )
+
         out["diagnostics"] = {"unmetCandidates": diagnostics}
-        out.setdefault(
+        summary = out.setdefault(
             "summary",
             {
                 "shortage": [],
                 "overstaff": [],
-                "totals": {"shortage": 0, "overstaff": 0, "requestedOffViolations": 0},
+                "totals": {
+                    "shortage": 0,
+                    "overstaff": 0,
+                    "wishOffViolations": 0,
+                    "requestedOffViolations": 0,
+                    "violatedPreferences": 0,
+                },
+                "diagnostics": {},
             },
+        )
+        summary.setdefault("diagnostics", {})
+        summary["diagnostics"].update(
+            {
+                "weekly": weekly_diagnostics,
+                "monthly": monthly_diagnostics,
+                "wishOffConflicts": wish_off_conflict_entries,
+                "wishOffConflictCount": wish_off_conflict_count,
+            }
         )
     ids = [p["id"] for p in staff]
     matrix_rows = []

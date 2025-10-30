@@ -1,7 +1,10 @@
-import { FormState, Person, Rules, ShiftCode, WeekdayJ } from '../types/config';
+import { FormState, Person, Rules, ShiftCode, WeekdayJ, WishOffs } from '../types/config';
+import { sanitizeWishOffs } from './wishOffs';
 
 type SolverPerson = Person & {
+  weeklyMin: number;
   weeklyMax: number;
+  monthlyMin: number;
   monthlyMax: number;
   consecMax: number;
 };
@@ -9,11 +12,17 @@ type SolverPerson = Person & {
 type SolverInput = {
   people: SolverPerson[];
   rules: Rules;
+  wishOffs?: WishOffs;
+  weights?: Record<string, unknown>;
   [key: string]: unknown;
 };
 
 type MaybeRules = Partial<Rules> & {
   nightRest?: Partial<Rules['nightRest']>;
+};
+
+type BuildOptions = {
+  wishOffs?: WishOffs;
 };
 
 const ensureNumber = (value: number | undefined, fallback = 0): number => {
@@ -25,7 +34,9 @@ const ensureNumber = (value: number | undefined, fallback = 0): number => {
 
 const normalizePerson = (person: Person): SolverPerson => ({
   ...person,
+  weeklyMin: ensureNumber(person.weeklyMin),
   weeklyMax: ensureNumber(person.weeklyMax),
+  monthlyMin: ensureNumber(person.monthlyMin),
   monthlyMax: ensureNumber(person.monthlyMax),
   consecMax: ensureNumber(person.consecMax),
 });
@@ -39,12 +50,33 @@ const normalizeRules = (rules: Rules): Rules => ({
   },
 });
 
-export const buildSolverInput = (base: Record<string, unknown>, form: FormState): SolverInput => {
-  const { rules: _baseRules, people: _basePeople, ...rest } = base as SolverInput;
+export const buildSolverInput = (
+  base: Record<string, unknown>,
+  form: FormState,
+  options: BuildOptions = {},
+): SolverInput => {
+  const { rules: _baseRules, people: _basePeople, wishOffs: baseWishOffs, weights: baseWeights, ...rest } =
+    base as SolverInput;
+
+  const mergedWishOffs = sanitizeWishOffs({
+    ...(typeof baseWishOffs === 'object' && baseWishOffs !== null ? baseWishOffs : {}),
+    ...(options.wishOffs ?? {}),
+  });
+
+  const weights: Record<string, unknown> = {
+    ...(typeof baseWeights === 'object' && baseWeights !== null ? baseWeights : {}),
+  };
+
+  if (weights.w_wish_off_violation === undefined && weights.W_requested_off_violation === undefined) {
+    weights.w_wish_off_violation = 20;
+  }
+
   return {
     ...rest,
     people: form.people.map(normalizePerson),
     rules: normalizeRules(form.rules),
+    weights,
+    wishOffs: mergedWishOffs,
   };
 };
 
@@ -57,9 +89,11 @@ export const deserializePeople = (people: unknown[]): Person[] =>
       fixedOffWeekdays: Array.isArray(raw.fixedOffWeekdays)
         ? (raw.fixedOffWeekdays as WeekdayJ[])
         : [],
-      weeklyMax: raw.weeklyMax || undefined,
-      monthlyMax: raw.monthlyMax || undefined,
-      consecMax: raw.consecMax || undefined,
+      weeklyMin: raw.weeklyMin ?? undefined,
+      weeklyMax: raw.weeklyMax ?? undefined,
+      monthlyMin: raw.monthlyMin ?? undefined,
+      monthlyMax: raw.monthlyMax ?? undefined,
+      consecMax: raw.consecMax ?? undefined,
     };
   });
 
