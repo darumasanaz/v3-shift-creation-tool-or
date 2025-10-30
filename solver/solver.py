@@ -274,26 +274,48 @@ def solve(data, time_limit=10.0):
                 x[d,i,k] for i in I for k in K if slot_contributes(shifts[k], slot)
             ))
 
-    # 7) 夜間厳格
-    for d in days:
-        # 21-23 == 2
-        m.Add(s[d,"21-23"] == 2)
-        # 0-7 == 2（d=1はcarryを考慮）
-        carry = 0
-        if d == 1:
-            for key in ("NA","NB","NC"):
-                carry += len(data["previousMonthNightCarry"].get(key, []))
-            rhs = max(0, 2 - carry)
-            m.Add(s[d,"0-7"] == rhs)
-        else:
-            m.Add(s[d,"0-7"] == 2)
-        # 18-21: 2〜3
-        m.Add(s[d,"18-21"] >= 2)
-        m.Add(s[d,"18-21"] <= 3)
-
-    # 8) 日中下限 + 9) need+1超の過剰ペナルティ
+    # 7) 夜間需要（不足はペナルティで吸収）
     weights = data["weights"]
     penalties = []
+    shortage_weight = weights.get("W_shortage", 1000)
+
+    for d in days:
+        dayType = data["dayTypeByDate"][d - 1]
+        needs = data["needTemplate"][dayType]
+
+        # 21-23 >= need (default 2). allow shortage with penalty
+        need_evening = needs.get("18-24", 2)
+        lack = m.NewIntVar(0, bigN, f"lack_d{d}_21_23")
+        m.Add(s[d, "21-23"] + lack >= need_evening)
+        m.Add(s[d, "21-23"] <= need_evening)
+        if shortage_weight:
+            penalties.append(shortage_weight * lack)
+
+        # 0-7 >= need（d=1はcarry考慮）。allow shortage with penalty
+        need_midnight = needs.get("0-7", 2)
+        carry = 0
+        if d == 1:
+            for key in ("NA", "NB", "NC"):
+                carry += len(data["previousMonthNightCarry"].get(key, []))
+        effective_need = max(0, need_midnight - carry)
+        lack_mid = m.NewIntVar(0, bigN, f"lack_d{d}_0_7")
+        m.Add(s[d, "0-7"] + lack_mid >= effective_need)
+        if d == 1:
+            m.Add(s[d, "0-7"] <= effective_need)
+        else:
+            m.Add(s[d, "0-7"] <= need_midnight)
+        if shortage_weight:
+            penalties.append(shortage_weight * lack_mid)
+
+        # 18-21 >= need (default 2) and <=3
+        need_evening_slot = needs.get("18-24", 2)
+        lack_18_21 = m.NewIntVar(0, bigN, f"lack_d{d}_18_21")
+        m.Add(s[d, "18-21"] + lack_18_21 >= need_evening_slot)
+        m.Add(s[d, "18-21"] <= 3)
+        if shortage_weight:
+            penalties.append(shortage_weight * lack_18_21)
+
+    # 8) 日中下限 + 9) need+1超の過剰ペナルティ
 
     default_requested_weight = weights.get("W_requested_off_violation", 20)
     for i, p in enumerate(staff):
@@ -313,9 +335,12 @@ def solve(data, time_limit=10.0):
         needs = data["needTemplate"][dayType]
         for slot in ["7-9","9-15","16-18"]:
             need = needs[slot]
-            m.Add(s[d,slot] >= need)
+            lack = m.NewIntVar(0, bigN, f"lack_d{d}_{slot}")
+            m.Add(s[d, slot] + lack >= need)
+            if shortage_weight:
+                penalties.append(shortage_weight * lack)
             ex = m.NewIntVar(0, bigN, f"ex_d{d}_{slot}")
-            m.Add(ex >= s[d,slot] - (need + 1))
+            m.Add(ex >= s[d, slot] - (need + 1))
             m.Add(ex >= 0)
             penalties.append(weights["W_overstaff_gt_need_plus1"] * ex)
 
