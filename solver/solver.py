@@ -74,6 +74,10 @@ SHIFT_CATALOG = _load_shift_catalog(SHIFT_CATALOG_PATH)
 SHIFT_BY_CODE = {entry["code"]: entry for entry in SHIFT_CATALOG}
 SHIFT_CODE_LIST = [entry["code"] for entry in SHIFT_CATALOG]
 SHIFT_CODES = set(SHIFT_CODE_LIST)
+SHIFT_CODE_TO_NAME = {
+    code: (details.get("name") if isinstance(details, dict) else None) or code
+    for code, details in SHIFT_BY_CODE.items()
+}
 
 
 class InputValidationError(Exception):
@@ -1227,6 +1231,32 @@ def solve(data, time_limit=10.0):
     out.setdefault("diagnostics", {}).update(solver_diagnostics)
     return out
 
+
+def convert_shift_codes_to_names(output_data: Dict[str, Any]) -> None:
+    """Replace shift codes in assignments and matrix entries with human-readable names."""
+
+    def translate(value: Any) -> Any:
+        if isinstance(value, str):
+            return SHIFT_CODE_TO_NAME.get(value, value)
+        return value
+
+    assignments = output_data.get("assignments")
+    if isinstance(assignments, list):
+        for entry in assignments:
+            if isinstance(entry, dict) and "shift" in entry:
+                entry["shift"] = translate(entry.get("shift"))
+
+    matrix_entries = output_data.get("matrix")
+    if isinstance(matrix_entries, list):
+        for row in matrix_entries:
+            if not isinstance(row, dict):
+                continue
+            shifts = row.get("shifts")
+            if isinstance(shifts, dict):
+                for key, value in list(shifts.items()):
+                    shifts[key] = translate(value)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="infile", required=True)
@@ -1236,6 +1266,8 @@ def main():
 
     data = json.load(open(args.infile, "r", encoding="utf-8"))
     result = solve(data, time_limit=args.time_limit)
+    if isinstance(result, dict):
+        convert_shift_codes_to_names(result)
     json.dump(result, open(args.outfile, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
     print(f"wrote {args.outfile}")
 
