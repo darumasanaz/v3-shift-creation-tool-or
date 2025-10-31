@@ -1,0 +1,55 @@
+{
+  "year": 2025,
+  "month": 12,
+  "days": 31,
+  "weekdayOfDay1": 1,
+  "previousMonthNightCarry": { "NA": [], "NB": [], "NC": [] },
+  "shifts": [
+    {"code":"EA","name":"早番","start":7,"end":16},
+    {"code":"DA","name":"日勤A","start":9,"end":18},
+    {"code":"DB","name":"日勤B","start":9,"end":16},
+    {"code":"LA","name":"遅番","start":15,"end":21},
+    {"code":"NA","name":"夜勤A","start":16,"end":33},
+    {"code":"NB","name":"夜勤B","start":18,"end":33},
+    {"code":"NC","name":"夜勤C","start":21,"end":31}
+  ],
+  "needTemplate": {
+    "bathDay": { "7-9":3, "9-15":5, "16-18":3, "18-24":2, "0-7":2 },
+    "normalDay": { "7-9":3, "9-15":4, "16-18":3, "18-24":2, "0-7":2 },
+    "wednesday": { "7-9":3, "9-15":2, "16-18":4, "18-24":2, "0-7":2 }
+  },
+  "dayTypeByDate": [
+    "bathDay","bathDay","wednesday","bathDay","bathDay","normalDay","normalDay",
+    "bathDay","bathDay","wednesday","bathDay","bathDay","normalDay","normalDay",
+    "bathDay","bathDay","wednesday","bathDay","bathDay","normalDay","normalDay",
+    "bathDay","bathDay","wednesday","bathDay","bathDay","normalDay","normalDay",
+    "bathDay","bathDay","wednesday"
+  ],
+  "strictNight": { "21-23":2, "0-7":2, "18-21_min":2, "18-21_max":3 },
+  "people": [
+    { "id":"西岡","canWork":["EA","DA","NA"],"fixedOffWeekdays":[],"weeklyMin":0,"weeklyMax":5,"monthlyMin":22,"monthlyMax":22,"consecMax":5 },
+    { "id":"今村","canWork":["EA","DA","NA"],"fixedOffWeekdays":[],"weeklyMin":0,"weeklyMax":5,"monthlyMin":22,"monthlyMax":22,"consecMax":5 },
+    { "id":"森川孝","canWork":["EA","DA","NA"],"fixedOffWeekdays":[],"weeklyMin":0,"weeklyMax":5,"monthlyMin":22,"monthlyMax":22,"consecMax":5 },
+    { "id":"藤本","canWork":["EA","DA"],"fixedOffWeekdays":[],"weeklyMin":0,"weeklyMax":4,"monthlyMin":16,"monthlyMax":17,"consecMax":4 },
+    { "id":"市川","canWork":["DB"],"fixedOffWeekdays":[],"weeklyMin":0,"weeklyMax":3,"monthlyMin":12,"monthlyMax":13,"consecMax":2 },
+    { "id":"申","canWork":["EA"],"fixedOffWeekdays":["水","木","金","日"],"weeklyMin":0,"weeklyMax":3,"monthlyMin":10,"monthlyMax":10,"consecMax":3 },
+    { "id":"南","canWork":["DA"],"fixedOffWeekdays":[],"weeklyMin":0,"weeklyMax":4,"monthlyMin":0,"monthlyMax":16,"consecMax":4 },
+    { "id":"瀬口","canWork":["DA"],"fixedOffWeekdays":[],"weeklyMin":0,"weeklyMax":1,"monthlyMin":3,"monthlyMax":3,"consecMax":2 },
+    { "id":"ミャットゥ","canWork":["DA","LA"],"fixedOffWeekdays":[],"weeklyMin":4,"weeklyMax":5,"monthlyMin":20,"monthlyMax":22,"consecMax":5 },
+    { "id":"辻","canWork":["NB"],"fixedOffWeekdays":["月","火","水","木","金","土"],"weeklyMin":0,"weeklyMax":1,"monthlyMin":2,"monthlyMax":4,"consecMax":2 },
+    { "id":"うしのはま","canWork":["NB"],"fixedOffWeekdays":[],"weeklyMin":0,"weeklyMax":4,"monthlyMin":10,"monthlyMax":10,"consecMax":5 },
+    { "id":"つじた","canWork":["NB"],"fixedOffWeekdays":[],"weeklyMin":0,"weeklyMax":4,"monthlyMin":8,"monthlyMax":8,"consecMax":5 },
+    { "id":"柴田","canWork":["NC"],"fixedOffWeekdays":["火","水","金","日"],"weeklyMin":2,"weeklyMax":5,"monthlyMin":12,"monthlyMax":14,"consecMax":4 },
+    { "id":"天野","canWork":["NB"],"fixedOffWeekdays":["月","水","木","土"],"weeklyMin":2,"weeklyMax":5,"monthlyMin":12,"monthlyMax":14,"consecMax":5 },
+    { "id":"渡邊","canWork":["NB"],"fixedOffWeekdays":[],"weeklyMin":1,"weeklyMax":2,"monthlyMin":4,"monthlyMax":4,"consecMax":5 },
+    { "id":"植田","canWork":["EA","DA","LA"],"fixedOffWeekdays":[],"weeklyMin":2,"weeklyMax":4,"monthlyMin":6,"monthlyMax":10,"consecMax":4 },
+    { "id":"小澤","canWork":["DB"],"fixedOffWeekdays":[],"weeklyMin":0,"weeklyMax":2,"monthlyMin":0,"monthlyMax":5,"consecMax":2 }
+  ],
+  "rules": { "noEarlyAfterDayAB": false, "nightRest": { "NA":2, "NB":1, "NC":1 } },
+  "weights": {
+    "W_shortage":1000, "W_overstaff_gt_need_plus1":5,
+    "W_balance_workdays":1, "W_prefer_fill_morning7_9":10,
+    "W_fill_9_15":3, "W_requested_off_violation":20
+  },
+  "wishOffs": {}
+}

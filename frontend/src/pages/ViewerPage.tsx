@@ -84,7 +84,21 @@ type ScheduleData = {
   diagnostics?: SolverDiagnostics;
 };
 
+type SampleOption = {
+  label: string;
+  path: string;
+};
+
+const SAMPLE_OUTPUT_OPTIONS: SampleOption[] = [
+  { label: 'output.json（ローカルファイル）', path: '/output.json' },
+  {
+    label: '2025年12月（現場データ・日本語表記）',
+    path: '/samples/output_dec2025.json',
+  },
+];
+
 const NIGHT_SHIFT_CODES = new Set(['NA', 'NB', 'NC']);
+const NIGHT_SHIFT_NAMES = new Set(['夜勤A', '夜勤B', '夜勤C']);
 const DEMAND_SLOTS: string[] = ['7-9', '9-15', '16-18', '18-21', '21-23', '0-7'];
 
 type SummaryCard = {
@@ -472,7 +486,30 @@ export default function ViewerPage() {
 
   const loadSample = async () => {
     try {
-      const res = await fetch('/output.json', { cache: 'no-store' });
+      let selected: SampleOption = SAMPLE_OUTPUT_OPTIONS[0];
+      if (typeof window !== 'undefined' && SAMPLE_OUTPUT_OPTIONS.length > 1) {
+        const message = SAMPLE_OUTPUT_OPTIONS.map(
+          (option, index) => `${index + 1}. ${option.label}`,
+        ).join('\n');
+        const input = window.prompt(
+          `読み込むサンプルを選択してください:\n${message}`,
+          '1',
+        );
+        if (input === null) {
+          return;
+        }
+        const choice = Number.parseInt(input, 10);
+        const option = Number.isNaN(choice)
+          ? undefined
+          : SAMPLE_OUTPUT_OPTIONS[choice - 1];
+        if (!option) {
+          alert(`1〜${SAMPLE_OUTPUT_OPTIONS.length} の番号を入力してください。`);
+          return;
+        }
+        selected = option;
+      }
+
+      const res = await fetch(selected.path, { cache: 'no-store' });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
@@ -486,10 +523,10 @@ export default function ViewerPage() {
       setPendingInput(null);
       setInputAnalysis(null);
       setAutoMessage(null);
-      alert('読み込み完了');
+      alert(`${selected.label} を読み込みました`);
     } catch (e) {
       console.error(e);
-      alert('output.json が見つかりません。READMEの「サンプル読込の準備」を参照してください。');
+      alert('サンプルデータの読み込みに失敗しました。READMEの「サンプル読込の準備」を参照してください。');
     }
   };
 
@@ -578,7 +615,7 @@ export default function ViewerPage() {
   );
 
   const nightShiftClass = (shift: ShiftCode) =>
-    NIGHT_SHIFT_CODES.has(shift)
+    NIGHT_SHIFT_CODES.has(shift) || NIGHT_SHIFT_NAMES.has(shift)
       ? 'bg-indigo-50 text-indigo-900'
       : '';
 
