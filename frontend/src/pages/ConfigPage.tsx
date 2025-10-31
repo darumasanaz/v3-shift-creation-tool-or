@@ -231,12 +231,6 @@ export default function ConfigPage() {
   };
 
   const handleExecute = async () => {
-    if (!isSolveAvailable) {
-      setStatus(null);
-      setError('solver 実行は開発モード限定です。');
-      return;
-    }
-
     if (!template) {
       setStatus(null);
       setError('サンプルテンプレートの取得を待っています');
@@ -260,7 +254,7 @@ export default function ConfigPage() {
       window.location.href = '/?from=config';
     } catch (err) {
       setStatus(null);
-      setError('solver 実行に失敗しました。条件を見直すか、ログを開いてください。');
+      setError('solver 実行に失敗しました。条件を見直すか、バックエンドのログを確認してください。');
       if (err instanceof SolveError) {
         console.error('solver execution failed', { status: err.status, body: err.body });
       } else {
@@ -403,7 +397,7 @@ export default function ConfigPage() {
           <button
             type="button"
             onClick={handleExecute}
-            disabled={!template || isExecuting}
+            disabled={!template || isExecuting || !isSolveAvailable}
             className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 disabled:cursor-not-allowed disabled:bg-slate-400"
           >
             {isExecuting && (
@@ -432,8 +426,11 @@ export default function ConfigPage() {
             {isExecuting ? '実行中…' : 'この条件で実行'}
           </button>
           <p className="text-sm text-slate-500">
-            Viewer は出力JSON（output.json）を表示します。入力JSONを読み込む場合は開発モードで solver を実行してください。
+            Viewer は solver API から取得した出力JSONを自動表示します。条件の保存後は Viewer を開いて結果を確認できます。
           </p>
+          {!isSolveAvailable && (
+            <p className="text-sm font-medium text-rose-600">solver API が無効化されています。環境設定を確認してください。</p>
+          )}
         </form>
       </main>
     </div>

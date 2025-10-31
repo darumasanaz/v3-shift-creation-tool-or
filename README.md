@@ -12,7 +12,7 @@ bash run_all.sh
 環境変数で調整可:
 
 ```bash
-TIME_LIMIT=90 PORT=5174 bash run_all.sh
+TIME_LIMIT=90 PORT=5174 API_PORT=9000 bash run_all.sh
 ```
 
 Windows ローカル:
@@ -32,6 +32,17 @@ pip install -r solver/requirements.txt
 python solver/solver.py --in solver/sample_input.json --out solver/output.json
 ```
 
+## Backend API
+`backend/main.py` に FastAPI ベースの solver API を用意しています。`/api/solve` へ `input.json` 相当の JSON を POST すると、`solver/solver.py` を実行して output.json を返却します。標準出力のログは `diagnostics.logOutput` に含まれ、Viewer で確認できます。
+
+開発時は次のコマンドで起動できます（既定ポートは `8000`）。
+
+```bash
+uvicorn backend.main:app --host 0.0.0.0 --port 8000
+```
+
+`SOLVER_TIME_LIMIT` 環境変数で solver の制限時間を調整可能です。`run_all.sh` / `run_all.ps1` では `API_PORT` と `SOLVER_TIME_LIMIT` を自動で設定し、フロントエンドから同一オリジンでアクセスできるようにプロキシしています。
+
 ## Frontend
 Vite + React + TypeScript + Tailwind CSS 構成で、シフト条件の作成と solver 出力の閲覧を行います。
 
@@ -44,12 +55,14 @@ Vite + React + TypeScript + Tailwind CSS 構成で、シフト条件の作成と
 - ローカル保存（localStorage）、保存データの読み込み
 - サンプル読込（`solver/sample_input_real.json` をベースにフォームへ反映）
 - 「入力JSONをダウンロード（solver用）」ボタンで people / rules / wishOffs を差し込んだ `input.json` を生成
+- 「この条件で実行」ボタンで solver API (`/api/solve`) を呼び出し、生成された output.json を Viewer へ自動的に引き渡し
 
 ### Viewer ページ（出力JSONビューア）
 OR-Tools の結果ファイル `solver/output.json` をローカルで読み込み、日付×スタッフのシフト表として確認できます。
-Config ページで生成した `input.json` を読み込んだ場合は、開発モードの `/api/solve` を利用して solver を自動実行し、結果を即座に表示します（本番環境では出力 JSON のみ表示）。
+Config ページで生成した `input.json` を読み込んだ場合や Config からの自動遷移では、バックエンドの `/api/solve` を呼び出して solver を実行し、結果とログを即座に表示します。
 
 - summary カードでは不足・過剰に加えて希望休違反（wishOffViolations）を表示
+- solver の標準出力ログや診断情報を画面上で確認可能
 
 ### WishOffs ページ（希望休管理）
 `/wish-offs` で 2025 年 12 月のカレンダーを表示し、スタッフごとの希望休（wish offs）を登録できます。
@@ -67,10 +80,10 @@ npm install
 npm run dev
 ```
 
-その後、ブラウザで [http://localhost:5173](http://localhost:5173) を開き、上部ナビゲーションから Viewer / Config / WishOffs を切り替えられます。
+別ターミナルで backend を起動していない場合は、上記の FastAPI サーバーを立ち上げてください（デフォルト: `uvicorn backend.main:app --port 8000`）。その後、ブラウザで [http://localhost:5173](http://localhost:5173) を開き、上部ナビゲーションから Viewer / Config / WishOffs を切り替えられます。
 Viewer ページでは `solver/output.json` をドラッグ＆ドロップするか「JSONを読み込み」ボタンから選択してください。
 Config ページでは条件を入力して「入力JSONをダウンロード（solver用）」で solver 入力を取得できます。
-開発モードで `input.json` を読み込むと `/api/solve` 経由で solver が実行され、得られた出力 JSON がそのまま表示されます（本番配信時は output.json を読み込ませてください）。
+`input.json` を読み込むと `/api/solve` 経由で solver が実行され、得られた出力 JSON とログがそのまま表示されます（本番運用時は output.json を直接読み込ませる運用も可能です）。
 
 ### サンプル読込の準備
 1. 最適化を実行して出力を生成します。
@@ -98,6 +111,7 @@ Config ページでは条件を入力して「入力JSONをダウンロード（
 - 夜勤シフト（NA / NB / NC）の淡色ハイライト
 - CSV ダウンロード（1 行目にヘッダ、UTF-8）
 - ドラッグ＆ドロップによる JSON 読み込み
+- solver API が出力したログの閲覧
 
 ※ フロントエンドは静的ビルドが可能な Vite + React + TypeScript + Tailwind CSS 構成です。
 

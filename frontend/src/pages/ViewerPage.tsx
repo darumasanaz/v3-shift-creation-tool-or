@@ -4,7 +4,7 @@ import {
   LAST_OUTPUT_STORAGE_KEY,
   LAST_OUTPUT_UPDATED_AT_KEY,
 } from '../lib/storageKeys';
-import { requestSolve, SolveError } from '../lib/solveClient';
+import { requestSolve, SolveError, isSolveAvailable } from '../lib/solveClient';
 
 type ShiftCode = string;
 
@@ -72,6 +72,7 @@ type SolverDiagnostics = {
   warnings?: string[];
   flags?: Record<string, unknown>;
   var_counts?: Record<string, number>;
+  logOutput?: string;
   [key: string]: unknown;
 };
 
@@ -242,6 +243,7 @@ export default function ViewerPage() {
   const [pendingInput, setPendingInput] = useState<Record<string, unknown> | null>(null);
   const [inputAnalysis, setInputAnalysis] = useState<InputDetection | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const solverEnabled = isSolveAvailable;
 
   const solverErrorInfo = schedule?.error;
   const solverErrorMessage =
@@ -351,6 +353,15 @@ export default function ViewerPage() {
       .sort((a, b) => a.key.localeCompare(b.key));
   }, [solverDiagnostics]);
 
+  const solverLogOutput = useMemo(() => {
+    if (!solverDiagnostics) return '';
+    const raw = solverDiagnostics.logOutput;
+    if (typeof raw === 'string') {
+      return raw.trim();
+    }
+    return '';
+  }, [solverDiagnostics]);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
@@ -407,7 +418,9 @@ export default function ViewerPage() {
   const buildInputGuidance = (analysis: InputDetection) =>
     [
       'このファイルは solver の入力JSONのようです。Viewer は出力JSON（output.json）を表示します。',
-      '開発モードでは「この入力で実行」ボタンで solver を実行し、結果を表示できます。',
+      solverEnabled
+        ? '「この入力で実行」ボタンで solver を実行し、結果を表示できます。'
+        : 'solver API が無効化されているため、この入力では自動実行できません。',
       buildInputSummary(analysis),
     ].join('\n');
 
@@ -503,7 +516,7 @@ export default function ViewerPage() {
           setSchedule(null);
           setPendingInput(parsed as Record<string, unknown>);
           setInputAnalysis(detection);
-          if (import.meta.env.DEV) {
+          if (solverEnabled) {
             void runSolver(parsed as Record<string, unknown>, detection);
           } else {
             setError(buildInputGuidance(detection));
@@ -667,7 +680,10 @@ export default function ViewerPage() {
           tabIndex={0}
         >
           <p className="text-lg font-medium text-slate-800">ここに JSON ファイルをドロップ</p>
-          <p className="text-sm text-slate-500">output.json はそのまま表示され、input.json は開発モードで solver を実行できます</p>
+          <p className="text-sm text-slate-500">
+            output.json はそのまま表示され、input.json は solver API を通じて結果を生成します。
+            {!solverEnabled && ' solver API が無効化されている場合は output.json を直接読み込んでください。'}
+          </p>
         </section>
 
         {notice && (
@@ -708,7 +724,17 @@ export default function ViewerPage() {
           </div>
         )}
 
-        {import.meta.env.DEV && pendingInput && inputAnalysis && (
+        {solverLogOutput && (
+          <section className="space-y-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm" aria-label="solverログ">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-800">Solver ログ</h2>
+              <p className="text-xs text-slate-500">バックエンドで実行された solver の標準出力です。</p>
+            </div>
+            <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-slate-900 px-3 py-2 text-xs leading-relaxed text-slate-100">{solverLogOutput}</pre>
+          </section>
+        )}
+
+        {solverEnabled && pendingInput && inputAnalysis && (
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -719,8 +745,13 @@ export default function ViewerPage() {
               {isSolving ? 'solver 実行中…' : 'この入力で実行'}
             </button>
             <p className="text-sm text-slate-500">
-              Python solver を呼び出して output.json 相当の結果を表示します。
+              solver API を呼び出して output.json 相当の結果を表示します。
             </p>
+          </div>
+        )}
+        {!solverEnabled && pendingInput && inputAnalysis && (
+          <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert">
+            solver API が無効化されているため、この入力JSONを自動実行できません。設定を確認するか、output.json を直接読み込んでください。
           </div>
         )}
 
