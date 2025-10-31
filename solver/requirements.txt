@@ -1,3 +1,5 @@
 ortools
 fastapi
 uvicorn
+pandas
+openpyxl

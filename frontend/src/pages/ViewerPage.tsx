@@ -5,6 +5,7 @@ import {
   LAST_OUTPUT_UPDATED_AT_KEY,
 } from '../lib/storageKeys';
 import { requestSolve, SolveError, isSolveAvailable } from '../lib/solveClient';
+import { requestScheduleXlsx } from '../lib/exportClient';
 
 type ShiftCode = string;
 
@@ -240,6 +241,51 @@ function downloadCsv(data: ScheduleData) {
   URL.revokeObjectURL(url);
 }
 
+function extractYearMonthFromSchedule(data: ScheduleData): { year?: number; month?: number } {
+  const sources: Record<string, unknown>[] = [];
+  const root = data as unknown;
+  if (isRecord(root)) {
+    sources.push(root);
+    const meta = root['meta'];
+    if (isRecord(meta)) {
+      sources.push(meta);
+    }
+    const inputEcho = root['inputEcho'];
+    if (isRecord(inputEcho)) {
+      sources.push(inputEcho);
+      const nestedMeta = inputEcho['meta'];
+      if (isRecord(nestedMeta)) {
+        sources.push(nestedMeta);
+      }
+    }
+  }
+
+  for (const source of sources) {
+    const yearValue = source['year'];
+    const monthValue = source['month'];
+    if (typeof yearValue === 'number' && Number.isFinite(yearValue) && typeof monthValue === 'number' && Number.isFinite(monthValue)) {
+      return { year: yearValue, month: monthValue };
+    }
+  }
+
+  return {};
+}
+
+function buildExcelFilename(schedule: ScheduleData, serverFilename?: string | null): string {
+  if (serverFilename) {
+    const trimmed = serverFilename.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+
+  const { year, month } = extractYearMonthFromSchedule(schedule);
+  if (typeof year === 'number' && typeof month === 'number') {
+    return `${year}-${String(month).padStart(2, '0')}-シフト表.xlsx`;
+  }
+  return 'shift-schedule.xlsx';
+}
+
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `rounded-md px-3 py-2 text-sm font-medium transition ${
     isActive
@@ -254,6 +300,7 @@ export default function ViewerPage() {
   const [autoMessage, setAutoMessage] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isSolving, setIsSolving] = useState(false);
+  const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const [pendingInput, setPendingInput] = useState<Record<string, unknown> | null>(null);
   const [inputAnalysis, setInputAnalysis] = useState<InputDetection | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -619,6 +666,31 @@ export default function ViewerPage() {
       ? 'bg-indigo-50 text-indigo-900'
       : '';
 
+  const downloadExcel = async () => {
+    if (!schedule || isDownloadingExcel) {
+      return;
+    }
+    setIsDownloadingExcel(true);
+    try {
+      const result = await requestScheduleXlsx(schedule);
+      const filename = buildExcelFilename(schedule, result.filename);
+      const url = URL.createObjectURL(result.blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (exportError) {
+      console.error('excel export failed', exportError);
+      setError('Excelダウンロードに失敗しました。バックエンドAPIが起動しているか確認してください。');
+      setNotice(null);
+    } finally {
+      setIsDownloadingExcel(false);
+    }
+  };
+
   const scheduleView = useMemo(() => {
     if (!schedule) return null;
 
@@ -686,6 +758,14 @@ export default function ViewerPage() {
               className="rounded-lg border border-indigo-200 px-4 py-2 text-sm font-medium text-indigo-700 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
             >
               CSVダウンロード
+            </button>
+            <button
+              type="button"
+              onClick={() => void downloadExcel()}
+              disabled={!schedule || isDownloadingExcel}
+              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 disabled:cursor-not-allowed disabled:bg-emerald-300"
+            >
+              {isDownloadingExcel ? 'Excel生成中…' : 'Excelダウンロード'}
             </button>
           </div>
         </div>
