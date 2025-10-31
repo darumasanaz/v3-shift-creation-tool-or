@@ -1232,6 +1232,19 @@ def solve(data, time_limit=10.0):
     return out
 
 
+def solve_from_dict(input_data: Dict[str, Any], *, time_limit: float = 10.0) -> Dict[str, Any]:
+    """Run the solver against in-memory data and return the output dictionary."""
+
+    # Deep-copy via JSON round-trip to avoid mutating the caller's payload.
+    payload = json.loads(json.dumps(input_data))
+    result = solve(payload, time_limit=time_limit)
+    if isinstance(result, dict):
+        convert_shift_codes_to_names(result)
+    else:
+        raise TypeError("Solver returned non-dict result")
+    return result
+
+
 def convert_shift_codes_to_names(output_data: Dict[str, Any]) -> None:
     """Replace shift codes in assignments and matrix entries with human-readable names."""
 
@@ -1265,9 +1278,7 @@ def main():
     args = ap.parse_args()
 
     data = json.load(open(args.infile, "r", encoding="utf-8"))
-    result = solve(data, time_limit=args.time_limit)
-    if isinstance(result, dict):
-        convert_shift_codes_to_names(result)
+    result = solve_from_dict(data, time_limit=args.time_limit)
     json.dump(result, open(args.outfile, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
     print(f"wrote {args.outfile}")
 

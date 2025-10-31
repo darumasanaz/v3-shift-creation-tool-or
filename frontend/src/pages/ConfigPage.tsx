@@ -9,6 +9,7 @@ import {
   LAST_OUTPUT_UPDATED_AT_KEY,
 } from '../lib/storageKeys';
 import { requestSolve, SolveError, isSolveAvailable } from '../lib/solveClient';
+import { evaluateSolverOutputStatus } from '../lib/solverStatus';
 import { loadWishOffsFromStorage } from '../lib/wishOffs';
 import { FormState, Person, Rules, WeekdayJ } from '../types/config';
 const SAMPLE_PATH = '/sample_input_real.json';
@@ -245,19 +246,34 @@ export default function ConfigPage() {
       const wishOffs = loadWishOffsFromStorage();
       const inputJson = buildSolverInput(template, formState, { wishOffs });
       const output = await requestSolve(inputJson);
+      const statusInfo = evaluateSolverOutputStatus(output);
 
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(LAST_OUTPUT_STORAGE_KEY, JSON.stringify(output));
         window.localStorage.setItem(LAST_OUTPUT_UPDATED_AT_KEY, new Date().toISOString());
       }
 
+      if (statusInfo.message && statusInfo.hideSchedule) {
+        setStatus(null);
+        setError(statusInfo.message);
+        return;
+      }
+
       window.location.href = '/?from=config';
     } catch (err) {
       setStatus(null);
-      setError('solver 実行に失敗しました。条件を見直すか、バックエンドのログを確認してください。');
       if (err instanceof SolveError) {
-        console.error('solver execution failed', { status: err.status, body: err.body });
+        const message =
+          err.message ||
+          'solver 実行に失敗しました。条件を見直すか、バックエンドのログを確認してください。';
+        setError(message);
+        console.error('solver execution failed', {
+          status: err.status,
+          body: err.body,
+          payload: err.payload,
+        });
       } else {
+        setError('solver 実行に失敗しました。条件を見直すか、バックエンドのログを確認してください。');
         console.error(err);
       }
     } finally {

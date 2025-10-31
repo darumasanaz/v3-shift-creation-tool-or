@@ -6,6 +6,7 @@ import {
 } from '../lib/storageKeys';
 import { requestSolve, SolveError, isSolveAvailable } from '../lib/solveClient';
 import { requestScheduleXlsx } from '../lib/exportClient';
+import { evaluateSolverOutputStatus } from '../lib/solverStatus';
 
 type ShiftCode = string;
 
@@ -18,6 +19,7 @@ type SummaryTotals = {
   shortage?: number;
   excess?: number;
   violatedPreferences?: number;
+  assigned?: number;
   [key: string]: number | undefined;
 };
 
@@ -77,12 +79,21 @@ type SolverDiagnostics = {
   [key: string]: unknown;
 };
 
+type AssignmentEntry = {
+  date?: number;
+  staffId?: string;
+  shift?: string;
+};
+
 type ScheduleData = {
   peopleOrder: string[];
   matrix: MatrixEntry[];
   summary?: Summary;
   error?: SolverErrorInfo | null;
   diagnostics?: SolverDiagnostics;
+  assignments?: AssignmentEntry[];
+  infeasible?: boolean;
+  reason?: string | null;
 };
 
 type SampleOption = {
@@ -333,6 +344,10 @@ export default function ViewerPage() {
     return messages;
   }, [demandDiagnostics, solverErrorMessage]);
 
+  const scheduleStatus = useMemo(() => evaluateSolverOutputStatus(schedule), [schedule]);
+  const suppressSchedule = scheduleStatus.hideSchedule;
+  const solverStatusMessage = scheduleStatus.message;
+
   const solverDiagnostics = schedule?.diagnostics ?? null;
   const diagnosticsFlags = useMemo(() => {
     const rawFlags = solverDiagnostics?.flags;
@@ -508,22 +523,36 @@ export default function ViewerPage() {
     setNotice(`${buildInputSummary(analysis)} solverを実行しています…`);
     try {
       const solved = await requestSolve(input);
+      const statusInfo = evaluateSolverOutputStatus(solved);
       const detection = detectScheduleJson(solved);
       if (detection.kind !== 'output') {
         throw new Error('Solver result did not match the expected output schema.');
       }
       setSchedule(solved as ScheduleData);
       setError(null);
-      setNotice(`${buildInputSummary(analysis)} solverの実行が完了しました。`);
+      const completionMessage = `${buildInputSummary(analysis)} solverの実行が完了しました。`;
+      setNotice(
+        statusInfo.message && statusInfo.hideSchedule
+          ? `${completionMessage} ${statusInfo.message}`
+          : completionMessage,
+      );
       setAutoMessage(null);
     } catch (solverError) {
       if (solverError instanceof SolveError) {
-        console.error('solver execution failed', { status: solverError.status, body: solverError.body });
+        console.error('solver execution failed', {
+          status: solverError.status,
+          body: solverError.body,
+          payload: solverError.payload,
+        });
+        setError(
+          solverError.message ||
+            'solverの実行に失敗しました。開発サーバーのログを確認してください。',
+        );
       } else {
         console.error(solverError);
+        setError('solverの実行に失敗しました。開発サーバーのログを確認してください。');
       }
       setSchedule(null);
-      setError('solverの実行に失敗しました。開発サーバーのログを確認してください。');
       setNotice(buildInputSummary(analysis));
       setAutoMessage(null);
     } finally {
@@ -667,7 +696,7 @@ export default function ViewerPage() {
       : '';
 
   const downloadExcel = async () => {
-    if (!schedule || isDownloadingExcel) {
+    if (!schedule || suppressSchedule || isDownloadingExcel) {
       return;
     }
     setIsDownloadingExcel(true);
@@ -692,7 +721,7 @@ export default function ViewerPage() {
   };
 
   const scheduleView = useMemo(() => {
-    if (!schedule) return null;
+    if (!schedule || suppressSchedule) return null;
 
     const matrix = Array.isArray(schedule.matrix) ? schedule.matrix : [];
     const dates = matrix.map((entry, index) => {
@@ -709,7 +738,7 @@ export default function ViewerPage() {
     }));
 
     return { dates, rows };
-  }, [schedule]);
+  }, [schedule, suppressSchedule]);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -753,8 +782,8 @@ export default function ViewerPage() {
             </button>
             <button
               type="button"
-              onClick={() => schedule && downloadCsv(schedule)}
-              disabled={!schedule}
+              onClick={() => schedule && !suppressSchedule && downloadCsv(schedule)}
+              disabled={!schedule || suppressSchedule}
               className="rounded-lg border border-indigo-200 px-4 py-2 text-sm font-medium text-indigo-700 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
             >
               CSVダウンロード
@@ -762,7 +791,7 @@ export default function ViewerPage() {
             <button
               type="button"
               onClick={() => void downloadExcel()}
-              disabled={!schedule || isDownloadingExcel}
+              disabled={!schedule || suppressSchedule || isDownloadingExcel}
               className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 disabled:cursor-not-allowed disabled:bg-emerald-300"
             >
               {isDownloadingExcel ? 'Excel生成中…' : 'Excelダウンロード'}
@@ -838,6 +867,15 @@ export default function ViewerPage() {
             role="alert"
           >
             {error}
+          </div>
+        )}
+
+        {schedule && solverStatusMessage && (
+          <div
+            className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 whitespace-pre-line"
+            role="alert"
+          >
+            {solverStatusMessage}
           </div>
         )}
 
@@ -1094,6 +1132,8 @@ export default function ViewerPage() {
               </tbody>
             </table>
           </section>
+        ) : schedule ? (
+          <p className="text-sm text-slate-500">シフト表は現在表示されていません。条件や需要設定を確認してください。</p>
         ) : (
           <p className="text-sm text-slate-500">output.json を読み込むとシフト表が表示されます。</p>
         )}

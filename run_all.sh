@@ -4,18 +4,18 @@ set -euo pipefail
 # ---- Settings (overridable) ----
 PORT="${PORT:-5173}"
 TIME_LIMIT="${TIME_LIMIT:-60}"
-API_PORT="${API_PORT:-8000}"
+API_PORT="${API_PORT:-8001}"
 PY="${PY:-python3}"
 
 # ---- Helpers ----
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$here"
 
-backend_pid=""
+server_pid=""
 cleanup() {
-  if [[ -n "${backend_pid}" ]]; then
+  if [[ -n "${server_pid}" ]]; then
     echo "\n🛑 Stopping solver API..."
-    kill "${backend_pid}" >/dev/null 2>&1 || true
+    kill "${server_pid}" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -30,13 +30,15 @@ source .venv/bin/activate
 echo "\U0001F4E6 Installing solver deps (if needed)..."
 pip install --quiet --upgrade pip >/dev/null
 pip install --quiet -r solver/requirements.txt >/dev/null || true
+echo "\U0001F9EA Installing server deps (if needed)..."
+pip install --quiet -r server/requirements.txt >/dev/null || true
 
 export SOLVER_TIME_LIMIT="${TIME_LIMIT}"
 export API_PORT
 
 echo "\U0001F680 Starting solver API on port ${API_PORT}..."
-"${PY}" -m uvicorn backend.main:app --host 0.0.0.0 --port "${API_PORT}" >/tmp/solver-api.log 2>&1 &
-backend_pid=$!
+PYTHONPATH="${here}" "${PY}" server/app.py >/tmp/solver-api.log 2>&1 &
+server_pid=$!
 sleep 1
 
 echo "\U0001F9E0 Running solver (time_limit=${TIME_LIMIT})..."
