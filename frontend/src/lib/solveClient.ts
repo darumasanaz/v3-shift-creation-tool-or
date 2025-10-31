@@ -13,7 +13,9 @@ export class SolveError extends Error {
   }
 }
 
-const SOLVE_API_BASE = (import.meta.env.VITE_SOLVE_API_BASE as string | undefined)?.replace(/\/+$/, '') ?? '';
+export const SOLVE_API_BASE_URL =
+  (import.meta.env.VITE_SOLVE_API_BASE as string | undefined)?.replace(/\/+$/, '') ?? '';
+const SOLVE_API_BASE = SOLVE_API_BASE_URL;
 const SOLVE_API_DISABLED =
   (import.meta.env.VITE_SOLVE_API_DISABLED as string | undefined)?.toLowerCase() === 'true' ||
   import.meta.env.VITE_SOLVE_API_DISABLED === '1';

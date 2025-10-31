@@ -9,8 +9,9 @@ from typing import Any, Dict, Tuple
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
+from solver import export_xlsx as export_xlsx_module
 from solver import solver as solver_module
 
 LOGGER = logging.getLogger("solver_api")
@@ -28,6 +29,10 @@ def _execute_solver(data: Dict[str, Any], time_limit: float) -> Tuple[Dict[str, 
     if not isinstance(result, dict):
         raise RuntimeError("Solver returned a non-dict response")
     return result, logs
+
+
+def _export_schedule(data: Dict[str, Any]) -> bytes:
+    return export_xlsx_module.export_to_xlsx_bytes(data)
 
 
 @app.get("/api/health")
@@ -85,3 +90,46 @@ async def solve_endpoint(request: Request) -> JSONResponse:
         result["diagnostics"] = diagnostics
 
     return JSONResponse(content=result)
+
+
+@app.post("/api/export-xlsx")
+async def export_xlsx_endpoint(request: Request) -> Response:
+    try:
+        payload = await request.json()
+    except Exception as exc:  # pragma: no cover - FastAPI wraps JSON errors
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "invalid_json", "message": "Request body must be valid JSON."},
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "invalid_payload", "message": "Request body must be a JSON object."},
+        )
+
+    try:
+        workbook = await run_in_threadpool(_export_schedule, payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "invalid_schedule", "message": str(exc)},
+        ) from exc
+    except Exception as exc:  # pragma: no cover - defensive logging
+        LOGGER.exception("Excel export failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "excel_export_failed", "message": "Excel export failed."},
+        ) from exc
+
+    try:
+        filename = export_xlsx_module.build_default_filename(payload)
+    except Exception:  # pragma: no cover - fallback filename
+        filename = "shift-schedule.xlsx"
+
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(
+        content=workbook,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )
