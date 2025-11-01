@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { AppHeader } from '../components/AppHeader';
+import { calcMonthMeta } from '../lib/calendar';
 import { CONFIG_STORAGE_KEY } from '../lib/storageKeys';
 import {
   WISH_OFFS_STORAGE_KEY,
@@ -7,20 +8,13 @@ import {
   sanitizeWishOffs,
   saveWishOffsToStorage,
 } from '../lib/wishOffs';
-import { WishOffs } from '../types/config';
-
-const DAYS_IN_MONTH = 31;
-const YEAR = 2025;
-const MONTH_INDEX = 11; // December
+import { WishOffCalendar, WishOffs } from '../types/config';
+import { useTargetMonth } from '../state/MonthContext';
+import { formatMonthKey } from '../state/monthStore';
 
 type StaffListItem = {
   id: string;
 };
-
-const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `rounded-md px-3 py-2 text-sm font-medium transition ${
-    isActive ? 'bg-indigo-600 text-white shadow' : 'text-indigo-700 hover:bg-indigo-50 hover:text-indigo-900'
-  }`;
 
 const downloadJson = (data: unknown, filename: string) => {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -56,18 +50,22 @@ const loadStaffFromStorage = (): StaffListItem[] => {
   }
 };
 
-const buildCalendarCells = () => {
-  const firstWeekday = new Date(YEAR, MONTH_INDEX, 1).getDay();
-  const totalCells = Math.ceil((firstWeekday + DAYS_IN_MONTH) / 7) * 7;
-  return Array.from({ length: totalCells }, (_, index) => {
-    const day = index - firstWeekday + 1;
-    return day >= 1 && day <= DAYS_IN_MONTH ? day : null;
+const formatHeading = (year: number, month: number) => `${year}年${month}月`;
+
+const removeEmptyEntries = (calendar: WishOffCalendar): WishOffCalendar => {
+  const next: WishOffCalendar = {};
+  Object.entries(calendar).forEach(([staffId, days]) => {
+    if (Array.isArray(days) && days.length > 0) {
+      next[staffId] = [...days].sort((a, b) => a - b);
+    }
   });
+  return next;
 };
 
-const CALENDAR_CELLS = buildCalendarCells();
-
 export default function WishOffsPage() {
+  const { targetMonth } = useTargetMonth();
+  const monthKey = formatMonthKey(targetMonth.year, targetMonth.month);
+
   const [staff, setStaff] = useState<StaffListItem[]>([]);
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
   const [wishOffs, setWishOffs] = useState<WishOffs>({});
@@ -87,22 +85,56 @@ export default function WishOffsPage() {
     }
   }, []);
 
+  const monthMeta = useMemo(
+    () => calcMonthMeta(targetMonth.year, targetMonth.month),
+    [targetMonth.year, targetMonth.month],
+  );
+
+  const calendarCells = useMemo(() => {
+    const firstWeekday = monthMeta.weekdayOfDay1;
+    const totalCells = Math.ceil((firstWeekday + monthMeta.days) / 7) * 7;
+    return Array.from({ length: totalCells }, (_, index) => {
+      const day = index - firstWeekday + 1;
+      return day >= 1 && day <= monthMeta.days ? day : null;
+    });
+  }, [monthMeta.days, monthMeta.weekdayOfDay1]);
+
   const selectedDays = useMemo(() => {
     if (!selectedStaffId) return [];
-    const days = wishOffs[selectedStaffId] ?? [];
+    const monthWishOffs = wishOffs[monthKey] ?? {};
+    const days = monthWishOffs[selectedStaffId] ?? [];
     return [...days].sort((a, b) => a - b);
-  }, [selectedStaffId, wishOffs]);
+  }, [selectedStaffId, wishOffs, monthKey]);
+
+  const updateMonthWishOffs = (updater: (current: WishOffCalendar) => WishOffCalendar) => {
+    setWishOffs((prev) => {
+      const currentMonth = prev[monthKey] ?? {};
+      const nextMonth = removeEmptyEntries(updater(currentMonth));
+      const nextAll = { ...prev };
+      if (Object.keys(nextMonth).length === 0) {
+        delete nextAll[monthKey];
+      } else {
+        nextAll[monthKey] = nextMonth;
+      }
+      return nextAll;
+    });
+  };
 
   const toggleDay = (day: number) => {
     if (!selectedStaffId) return;
-    setWishOffs((prev) => {
-      const current = prev[selectedStaffId] ?? [];
-      const has = current.includes(day);
-      const nextDays = has ? current.filter((value) => value !== day) : [...current, day].sort((a, b) => a - b);
-      return {
-        ...prev,
-        [selectedStaffId]: nextDays,
-      };
+    updateMonthWishOffs((current) => {
+      const currentDays = current[selectedStaffId] ?? [];
+      const has = currentDays.includes(day);
+      const nextDays = has
+        ? currentDays.filter((value) => value !== day)
+        : [...currentDays, day].sort((a, b) => a - b);
+      const next: WishOffCalendar = { ...current };
+      if (nextDays.length === 0) {
+        delete next[selectedStaffId];
+      } else {
+        next[selectedStaffId] = nextDays;
+      }
+      return next;
     });
     setStatus(null);
     setError(null);
@@ -110,12 +142,16 @@ export default function WishOffsPage() {
 
   const removeDay = (day: number) => {
     if (!selectedStaffId) return;
-    setWishOffs((prev) => {
-      const current = prev[selectedStaffId] ?? [];
-      return {
-        ...prev,
-        [selectedStaffId]: current.filter((value) => value !== day),
-      };
+    updateMonthWishOffs((current) => {
+      const currentDays = current[selectedStaffId] ?? [];
+      const next: WishOffCalendar = { ...current };
+      const filtered = currentDays.filter((value) => value !== day);
+      if (filtered.length === 0) {
+        delete next[selectedStaffId];
+      } else {
+        next[selectedStaffId] = filtered;
+      }
+      return next;
     });
     setStatus(null);
     setError(null);
@@ -153,28 +189,14 @@ export default function WishOffsPage() {
     setError(null);
   };
 
-  const calendarCells = CALENDAR_CELLS;
   const isCalendarDisabled = !selectedStaffId;
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white shadow-sm">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-4 px-4 py-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-semibold text-slate-900">希望休エディタ (2025年12月)</h1>
-            <nav className="flex items-center gap-1">
-              <NavLink to="/" className={navLinkClass}>
-                Viewer
-              </NavLink>
-              <NavLink to="/config" className={navLinkClass}>
-                Config
-              </NavLink>
-              <NavLink to="/wish-offs" className={navLinkClass}>
-                WishOffs
-              </NavLink>
-            </nav>
-          </div>
-          <div className="ml-auto flex flex-wrap items-center gap-2">
+      <AppHeader
+        title={`希望休エディタ（${formatHeading(targetMonth.year, targetMonth.month)}）`}
+        actions={
+          <>
             <button
               type="button"
               onClick={refreshStaff}
@@ -196,9 +218,9 @@ export default function WishOffsPage() {
             >
               JSONダウンロード
             </button>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6">
         {status && (
@@ -279,7 +301,7 @@ export default function WishOffsPage() {
                 const isActive = selectedDays.includes(day);
                 return (
                   <button
-                    key={day}
+                    key={`${monthKey}-${day}`}
                     type="button"
                     onClick={() => toggleDay(day)}
                     disabled={isCalendarDisabled}
@@ -303,7 +325,7 @@ export default function WishOffsPage() {
                 ) : (
                   selectedDays.map((day) => (
                     <span
-                      key={day}
+                      key={`${monthKey}-${day}`}
                       className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800"
                     >
                       {day}日

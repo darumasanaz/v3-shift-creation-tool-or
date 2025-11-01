@@ -13,8 +13,12 @@ export type Person = {
   consecMax?: number;
 };
 
-export type WishOffs = {
+export type WishOffCalendar = {
   [staffId: string]: number[];
+};
+
+export type WishOffs = {
+  [monthKey: string]: WishOffCalendar;
 };
 
 export type NightRestSetting = {

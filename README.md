@@ -49,6 +49,8 @@ Excel ダウンロードは同様に `/api/export-xlsx` を呼び出し、Python
 
 ## Viewer / Config / WishOffs
 
+- 共通ヘッダー右上の「作成月」で対象月 (YYYY-MM) を切り替えられます。選択値はブラウザのローカルストレージに保存され、Config / WishOffs / Viewer の計算すべてに反映されます。
+
 ### Config ページ（条件フォーム）
 - 勤務可シフト・固定休・上限などを入力して solver 用 `input.json` を構築
 - サンプル読込（`solver/sample_input_real.json`）で初期データを展開
@@ -63,9 +65,15 @@ Excel ダウンロードは同様に `/api/export-xlsx` を呼び出し、Python
 - CSV / Excel ダウンロードに対応（Excel は `/api/export-xlsx` を利用）
 
 ### WishOffs ページ（希望休管理）
-- 2025 年 12 月の希望休をカレンダー UI で登録
+- 選択月の 1 日〜末日をカレンダー表示し、希望休を登録
 - Config で登録したスタッフから対象を選択
 - JSON ダウンロード / ローカル保存に対応（保存キーは自動管理）
+
+#### 操作例（2025 年 12 月を生成する場合）
+1. ヘッダー右上の月セレクタを `2025-12` に変更
+2. Config ページで条件を保存
+3. Viewer ページの「この条件で実行」を押す
+   - `input.json` に `year=2025`, `month=12`, `days=31`, `weekdayOfDay1=1`, `dayTypeByDate`（土日: normalDay / 水曜: wednesday / それ以外: bathDay）が設定されます
 
 ## サンプルデータの利用
 サンプルの output.json を即座に確認したい場合は、別ターミナルで次を実行してください。

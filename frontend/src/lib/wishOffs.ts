@@ -1,32 +1,73 @@
 import { WISH_OFFS_STORAGE_KEY } from './storageKeys';
-import { WishOffs } from '../types/config';
+import { WishOffCalendar, WishOffs } from '../types/config';
 
 export { WISH_OFFS_STORAGE_KEY } from './storageKeys';
 
 const isValidDay = (value: number): boolean => Number.isInteger(value) && value >= 1 && value <= 31;
 
-export const sanitizeWishOffs = (value: unknown): WishOffs => {
-  if (!value || typeof value !== 'object') {
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const MONTH_KEY_PATTERN = /^\d{4}-\d{2}$/;
+
+const sanitizeDayList = (raw: unknown): number[] => {
+  if (!Array.isArray(raw)) return [];
+  return Array.from(
+    new Set(
+      raw
+        .map((day) => (typeof day === 'number' ? day : Number(day)))
+        .filter((day) => isValidDay(day)),
+    ),
+  ).sort((a, b) => a - b);
+};
+
+const sanitizeCalendar = (value: unknown): WishOffCalendar => {
+  if (!isRecord(value)) return {};
+  const result: WishOffCalendar = {};
+  Object.entries(value).forEach(([staffId, rawDays]) => {
+    if (typeof staffId !== 'string') return;
+    const sanitized = sanitizeDayList(rawDays);
+    if (sanitized.length > 0) {
+      result[staffId] = sanitized;
+    }
+  });
+  return result;
+};
+
+export const sanitizeWishOffs = (value: unknown, legacyMonthKey?: string): WishOffs => {
+  if (!isRecord(value)) {
+    if (legacyMonthKey) {
+      const legacyCalendar = sanitizeCalendar(value);
+      return Object.keys(legacyCalendar).length > 0 ? { [legacyMonthKey]: legacyCalendar } : {};
+    }
     return {};
   }
 
   const result: WishOffs = {};
-  const entries = Object.entries(value as Record<string, unknown>);
-  for (const [staffId, rawDays] of entries) {
-    if (typeof staffId !== 'string') continue;
-    if (!Array.isArray(rawDays)) {
-      result[staffId] = [];
-      continue;
+  let monthEntryCount = 0;
+  Object.entries(value).forEach(([key, raw]) => {
+    if (!isRecord(raw)) {
+      return;
     }
-    const sanitized = Array.from(
-      new Set(
-        rawDays
-          .map((day) => (typeof day === 'number' ? day : Number(day)))
-          .filter((day) => isValidDay(day)),
-      ),
-    ).sort((a, b) => a - b);
-    result[staffId] = sanitized;
+    const sanitized = sanitizeCalendar(raw);
+    if (Object.keys(sanitized).length === 0) {
+      return;
+    }
+    if (MONTH_KEY_PATTERN.test(key)) {
+      result[key] = sanitized;
+      monthEntryCount += 1;
+    } else if (legacyMonthKey && result[legacyMonthKey] === undefined) {
+      result[legacyMonthKey] = sanitized;
+    }
+  });
+
+  if (monthEntryCount === 0 && legacyMonthKey) {
+    const fallback = sanitizeCalendar(value);
+    if (Object.keys(fallback).length > 0) {
+      result[legacyMonthKey] = fallback;
+    }
   }
+
   return result;
 };
 

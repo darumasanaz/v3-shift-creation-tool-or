@@ -1,6 +1,8 @@
 import { SHIFT_CATALOG, ShiftCode } from '../constants/shifts';
-import { FormState, Person, Rules, WeekdayJ, WishOffs } from '../types/config';
+import { FormState, Person, Rules, WeekdayJ, WishOffCalendar, WishOffs } from '../types/config';
 import { sanitizeWishOffs } from './wishOffs';
+import { calcMonthMeta } from './calendar';
+import { loadTargetMonth, formatMonthKey } from '../state/monthStore';
 
 type SolverPerson = Person & {
   weeklyMin: number;
@@ -13,7 +15,7 @@ type SolverPerson = Person & {
 type SolverInput = {
   people: SolverPerson[];
   rules: Rules;
-  wishOffs?: WishOffs;
+  wishOffs?: WishOffCalendar;
   weights?: Record<string, unknown>;
   [key: string]: unknown;
 };
@@ -56,13 +58,33 @@ export const buildSolverInput = (
   form: FormState,
   options: BuildOptions = {},
 ): SolverInput => {
-  const { rules: _baseRules, people: _basePeople, wishOffs: baseWishOffs, weights: baseWeights, ...rest } =
-    base as SolverInput;
+  const {
+    rules: _baseRules,
+    people: _basePeople,
+    wishOffs: baseWishOffs,
+    weights: baseWeights,
+    year: baseYearRaw,
+    month: baseMonthRaw,
+    ...rest
+  } = base as SolverInput & { year?: unknown; month?: unknown };
 
-  const mergedWishOffs = sanitizeWishOffs({
-    ...(typeof baseWishOffs === 'object' && baseWishOffs !== null ? baseWishOffs : {}),
-    ...(options.wishOffs ?? {}),
-  });
+  const baseYear = typeof baseYearRaw === 'number' ? baseYearRaw : undefined;
+  const baseMonth = typeof baseMonthRaw === 'number' ? baseMonthRaw : undefined;
+  const legacyMonthKey =
+    baseYear !== undefined && baseMonth !== undefined ? formatMonthKey(baseYear, baseMonth) : undefined;
+
+  const mergedWishOffs = sanitizeWishOffs(
+    {
+      ...(typeof baseWishOffs === 'object' && baseWishOffs !== null ? baseWishOffs : {}),
+      ...(options.wishOffs ?? {}),
+    },
+    legacyMonthKey,
+  );
+
+  const target = loadTargetMonth();
+  const monthMeta = calcMonthMeta(target.year, target.month);
+  const monthKey = formatMonthKey(target.year, target.month);
+  const monthWishOffs = mergedWishOffs[monthKey] ?? {};
 
   const weights: Record<string, unknown> = {
     ...(typeof baseWeights === 'object' && baseWeights !== null ? baseWeights : {}),
@@ -74,11 +96,16 @@ export const buildSolverInput = (
 
   return {
     ...rest,
+    year: target.year,
+    month: target.month,
+    days: monthMeta.days,
+    weekdayOfDay1: monthMeta.weekdayOfDay1,
+    dayTypeByDate: monthMeta.dayTypeByDate,
     shifts: SHIFT_CATALOG.map((shift) => ({ ...shift })),
     people: form.people.map(normalizePerson),
     rules: normalizeRules(form.rules),
     weights,
-    wishOffs: mergedWishOffs,
+    wishOffs: monthWishOffs,
   };
 };
 

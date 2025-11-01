@@ -1,5 +1,4 @@
 import { ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { NavLink } from 'react-router-dom';
 import {
   LAST_OUTPUT_STORAGE_KEY,
   LAST_OUTPUT_UPDATED_AT_KEY,
@@ -7,6 +6,7 @@ import {
 import { requestSolve, SolveError, isSolveAvailable } from '../lib/solveClient';
 import { requestScheduleXlsx } from '../lib/exportClient';
 import { evaluateSolverOutputStatus } from '../lib/solverStatus';
+import { AppHeader } from '../components/AppHeader';
 
 type ShiftCode = string;
 
@@ -296,13 +296,6 @@ function buildExcelFilename(schedule: ScheduleData, serverFilename?: string | nu
   }
   return 'shift-schedule.xlsx';
 }
-
-const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `rounded-md px-3 py-2 text-sm font-medium transition ${
-    isActive
-      ? 'bg-indigo-600 text-white shadow'
-      : 'text-indigo-700 hover:bg-indigo-50 hover:text-indigo-900'
-  }`;
 
 export default function ViewerPage() {
   const [schedule, setSchedule] = useState<ScheduleData | null>(null);
@@ -743,23 +736,10 @@ export default function ViewerPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white shadow-sm">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3 px-4 py-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-semibold text-slate-900">出力JSONビューア</h1>
-            <nav className="flex items-center gap-1">
-              <NavLink to="/" className={navLinkClass}>
-                Viewer
-              </NavLink>
-              <NavLink to="/config" className={navLinkClass}>
-                Config
-              </NavLink>
-              <NavLink to="/wish-offs" className={navLinkClass}>
-                WishOffs
-              </NavLink>
-            </nav>
-          </div>
-          <div className="ml-auto flex flex-wrap items-center gap-2">
+      <AppHeader
+        title="出力JSONビューア"
+        actions={
+          <>
             <input
               ref={fileInputRef}
               type="file"
@@ -797,9 +777,9 @@ export default function ViewerPage() {
             >
               {isDownloadingExcel ? 'Excel生成中…' : 'Excelダウンロード'}
             </button>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6">
         {autoMessage && (
