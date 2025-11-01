@@ -1,5 +1,4 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { NavLink } from 'react-router-dom';
 import { StaffForm } from '../components/StaffForm';
 import { SHIFT_CODES, SHIFT_CODE_SET, ShiftCode } from '../constants/shifts';
 import { buildSolverInput, deserializePeople, deserializeRules } from '../lib/jsonBuilders';
@@ -12,6 +11,7 @@ import { requestSolve, SolveError, isSolveAvailable } from '../lib/solveClient';
 import { evaluateSolverOutputStatus } from '../lib/solverStatus';
 import { loadWishOffsFromStorage } from '../lib/wishOffs';
 import { FormState, Person, Rules, WeekdayJ } from '../types/config';
+import { AppHeader } from '../components/AppHeader';
 const SAMPLE_PATH = '/sample_input_real.json';
 
 const WEEKDAY_CODES: WeekdayJ[] = ['月', '火', '水', '木', '金', '土', '日'];
@@ -68,13 +68,6 @@ const sanitizeFormState = (value: unknown): FormState => {
     rules: deserializeRules(rulesSource, DEFAULT_RULES),
   };
 };
-
-const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `rounded-md px-3 py-2 text-sm font-medium transition ${
-    isActive
-      ? 'bg-indigo-600 text-white shadow'
-      : 'text-indigo-700 hover:bg-indigo-50 hover:text-indigo-900'
-  }`;
 
 const downloadJson = (data: unknown, filename: string) => {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -288,23 +281,10 @@ export default function ConfigPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white shadow-sm">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-4 px-4 py-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-semibold text-slate-900">シフト条件エディタ</h1>
-            <nav className="flex items-center gap-1">
-              <NavLink to="/" className={navLinkClass}>
-                Viewer
-              </NavLink>
-              <NavLink to="/config" className={navLinkClass}>
-                Config
-              </NavLink>
-              <NavLink to="/wish-offs" className={navLinkClass}>
-                WishOffs
-              </NavLink>
-            </nav>
-          </div>
-          <div className="ml-auto flex flex-wrap items-center gap-2">
+      <AppHeader
+        title="シフト条件エディタ"
+        actions={
+          <>
             <button
               type="button"
               onClick={handleSave}
@@ -327,9 +307,9 @@ export default function ConfigPage() {
             >
               {isLoadingSample ? '読込中…' : 'サンプル読込'}
             </button>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6">
         {status && (
