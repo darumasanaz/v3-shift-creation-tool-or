@@ -1,13 +1,28 @@
-import json, argparse
+import argparse
+import json
+import numbers
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Any, Dict, List
 from ortools.sat.python import cp_model
 
 SLOTS = ["0-7", "7-9", "9-15", "16-18", "18-21", "21-23"]
 SUMMARY_SLOTS = ["7-9", "9-15", "16-18", "18-21", "21-23", "0-7"]
 
 NEED_TEMPLATE_SLOTS = ["7-9", "9-15", "16-18", "18-24", "0-7"]
+
+DEFAULT_INPUT_PATH = Path("input.json")
+DEFAULT_OUTPUT_PATH = Path("solver/output.json")
+REQUIRED_INPUT_KEYS = (
+    "days",
+    "weekdayOfDay1",
+    "dayTypeByDate",
+    "needTemplate",
+    "people",
+    "shifts",
+    "strictNight",
+)
 
 
 def _load_shift_catalog(path: Path) -> List[Dict[str, Any]]:
@@ -444,6 +459,7 @@ def prepare_demand(data):
 
     per_day = []
     total_need = 0
+    slot_totals = {slot: 0 for slot in SUMMARY_SLOTS}
     for day_index, day_type in enumerate(day_types, start=1):
         slots = need_template[day_type]
         day_summary = {
@@ -463,6 +479,8 @@ def prepare_demand(data):
         day_summary["carryApplied"] = bool(carry_today and midnight_need)
         per_day.append(day_summary)
         total_need += day_summary["total"]
+        for slot in SUMMARY_SLOTS:
+            slot_totals[slot] += int(day_summary["slots"].get(slot, 0) or 0)
 
     diagnostics = {
         "days": days,
@@ -470,6 +488,8 @@ def prepare_demand(data):
         "dayTypeSample": day_types[: min(7, len(day_types))],
         "perDayTotals": per_day,
         "totalNeed": total_need,
+        "slotTotals": slot_totals,
+        "uniqueDayTypes": sorted({day_type for day_type in day_types}),
     }
 
     if total_need == 0:
@@ -488,6 +508,14 @@ def log_demand_diagnostics(diagnostics):
         return
     days = diagnostics.get("days")
     weekday0 = diagnostics.get("weekdayOfDay1")
+    slot_totals = diagnostics.get("slotTotals") or {}
+    ordered_totals = None
+    if isinstance(slot_totals, dict):
+        ordered_totals = {slot: int(slot_totals.get(slot, 0) or 0) for slot in SUMMARY_SLOTS}
+    unique_day_types = diagnostics.get("uniqueDayTypes")
+    if ordered_totals is not None:
+        unique_count = len(unique_day_types) if isinstance(unique_day_types, list) else "?"
+        print(f"[needTemplate] slotTotals={ordered_totals} uniqueDayTypes={unique_count}")
     print(f"[demand] days={days} weekdayOfDay1={weekday0}")
     sample = diagnostics.get("dayTypeSample") or []
     if sample:
@@ -498,6 +526,49 @@ def log_demand_diagnostics(diagnostics):
         ordered = {slot: slots.get(slot) for slot in ["7-9", "9-15", "16-18", "18-21", "21-23", "0-7"]}
         print(f"[demand] day {entry.get('date')} total={entry.get('total')} slots={ordered}")
     print(f"[demand] totalNeed={diagnostics.get('totalNeed')}")
+
+
+def ensure_required_input_keys(data: Dict[str, Any]) -> None:
+    missing = [key for key in REQUIRED_INPUT_KEYS if key not in data]
+    if missing:
+        raise InputValidationError(
+            "Input JSON is missing required keys.",
+            code="missing_required_keys",
+            details={"missing": missing},
+        )
+
+
+def validate_basic_structure(data: Dict[str, Any]) -> None:
+    ensure_required_input_keys(data)
+    days_value = data.get("days")
+    if not isinstance(days_value, int):
+        raise InputValidationError(
+            "days must be an integer.",
+            code="invalid_days",
+            details={"days": days_value},
+        )
+    day_types = data.get("dayTypeByDate")
+    if isinstance(day_types, list) and len(day_types) != days_value:
+        raise InputValidationError(
+            "days does not match dayTypeByDate length.",
+            code="invalid_day_type_length",
+            details={"expected": days_value, "actual": len(day_types)},
+        )
+
+
+def log_strict_night_summary(strict_night: Any) -> None:
+    if not isinstance(strict_night, dict):
+        print("[strictNight] (not provided)")
+        return
+    keys = ["18-21_min", "18-21_max", "21-23", "0-7"]
+    parts: List[str] = []
+    for key in keys:
+        value = strict_night.get(key)
+        if isinstance(value, numbers.Number) and value == value:
+            parts.append(f"{key}={int(value)}")
+        else:
+            parts.append(f"{key}=—")
+    print(f"[strictNight] {' '.join(parts)}")
 
 
 def build_validation_error_output(data, error: InputValidationError):
@@ -697,12 +768,14 @@ def estimate_slot_max_possible(data):
 
 def solve(data, time_limit=10.0):
     try:
+        ensure_required_input_keys(data)
         ensure_shift_definitions(data)
         ensure_people_shift_codes(data)
         prepared = prepare_demand(data)
     except InputValidationError as error:
         return build_validation_error_output(data, error)
 
+    log_strict_night_summary(data.get("strictNight"))
     log_demand_diagnostics(prepared.diagnostics)
 
     data["days"] = prepared.days
@@ -1285,17 +1358,76 @@ def convert_shift_codes_to_names(output_data: Dict[str, Any]) -> None:
                     shifts[key] = translate(value)
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--in", dest="infile", required=True)
-    ap.add_argument("--out", dest="outfile", required=True)
-    ap.add_argument("--time_limit", type=float, default=10.0)
-    args = ap.parse_args()
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--input",
+        "--in",
+        dest="input",
+        default=str(DEFAULT_INPUT_PATH),
+        help="Path to input JSON file.",
+    )
+    parser.add_argument(
+        "--output",
+        "--out",
+        dest="output",
+        default=str(DEFAULT_OUTPUT_PATH),
+        help="Path to write solver output JSON.",
+    )
+    parser.add_argument("--time_limit", type=float, default=10.0)
+    return parser.parse_args()
 
-    data = json.load(open(args.infile, "r", encoding="utf-8"))
+
+def main():
+    args = parse_args()
+    input_path = Path(args.input)
+    output_path = Path(args.output)
+
+    try:
+        raw_text = input_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        print(f"[error] input file not found: {input_path}", file=sys.stderr)
+        raise SystemExit(2)
+
+    try:
+        data = json.loads(raw_text)
+    except json.JSONDecodeError as error:
+        print(f"[error] failed to parse JSON: {error}", file=sys.stderr)
+        raise SystemExit(3)
+
+    if not isinstance(data, dict):
+        print("[error] input JSON must be an object", file=sys.stderr)
+        raise SystemExit(4)
+
+    print(f"[input] path={input_path}")
+
+    try:
+        validate_basic_structure(data)
+    except InputValidationError as error:
+        print(f"[error] {error.message}", file=sys.stderr)
+        if error.details:
+            print(
+                f"[error] details={json.dumps(error.details, ensure_ascii=False)}",
+                file=sys.stderr,
+            )
+        raise SystemExit(1)
+
+    days_value = int(data.get("days", 0))
+    weekday_value = data.get("weekdayOfDay1")
+    if isinstance(weekday_value, numbers.Number) and weekday_value == weekday_value:
+        weekday_display = int(weekday_value)
+    else:
+        weekday_display = weekday_value
+    print(f"[input] days={days_value} weekdayOfDay1={weekday_display}")
+
     result = solve_from_dict(data, time_limit=args.time_limit)
-    json.dump(result, open(args.outfile, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-    print(f"wrote {args.outfile}")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    print(f"[output] path={output_path}")
 
 if __name__ == "__main__":
     main()

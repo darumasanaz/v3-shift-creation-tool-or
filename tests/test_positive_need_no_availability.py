@@ -20,6 +20,12 @@ def build_base_input():
         "people": [],
         "previousMonthNightCarry": {"NA": [], "NB": [], "NC": []},
         "shifts": deepcopy(solver.SHIFT_CATALOG),
+        "strictNight": {
+            "18-21_min": 0,
+            "18-21_max": 0,
+            "21-23": 0,
+            "0-7": 0,
+        },
     }
 
 
