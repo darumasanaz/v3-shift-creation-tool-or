@@ -1019,6 +1019,21 @@ def solve(data, time_limit=10.0):
     res = solver.Solve(m)
 
     out = {"assignments": []}
+
+    def _safe_int(value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    meta: Dict[str, Any] = {"days": int(days_count)}
+    year_value = _safe_int(data.get("year"))
+    month_value = _safe_int(data.get("month"))
+    if year_value is not None:
+        meta["year"] = year_value
+    if month_value is not None:
+        meta["month"] = month_value
+    out["meta"] = meta
     if res in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         s_values = {(d, slot): solver.Value(s[d, slot]) for d in days for slot in SLOTS}
         for d in days:

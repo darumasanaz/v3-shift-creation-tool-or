@@ -11,6 +11,7 @@ import {
 import { WishOffCalendar, WishOffs } from '../types/config';
 import { useTargetMonth } from '../state/MonthContext';
 import { formatMonthKey } from '../state/monthStore';
+import { resolveDays } from '../viewer/lib/days';
 
 type StaffListItem = {
   id: string;
@@ -90,14 +91,25 @@ export default function WishOffsPage() {
     [targetMonth.year, targetMonth.month],
   );
 
+  const monthDays = useMemo(
+    () =>
+      resolveDays(undefined, {
+        days: monthMeta.days,
+        dayTypeByDate: monthMeta.dayTypeByDate,
+        year: targetMonth.year,
+        month: targetMonth.month,
+      }),
+    [monthMeta.days, monthMeta.dayTypeByDate, targetMonth.year, targetMonth.month],
+  );
+
   const calendarCells = useMemo(() => {
     const firstWeekday = monthMeta.weekdayOfDay1;
-    const totalCells = Math.ceil((firstWeekday + monthMeta.days) / 7) * 7;
+    const totalCells = Math.ceil((firstWeekday + monthDays) / 7) * 7;
     return Array.from({ length: totalCells }, (_, index) => {
       const day = index - firstWeekday + 1;
-      return day >= 1 && day <= monthMeta.days ? day : null;
+      return day >= 1 && day <= monthDays ? day : null;
     });
-  }, [monthMeta.days, monthMeta.weekdayOfDay1]);
+  }, [monthDays, monthMeta.weekdayOfDay1]);
 
   const selectedDays = useMemo(() => {
     if (!selectedStaffId) return [];
