@@ -26,6 +26,9 @@ export function resolveDays(out?: unknown, inJson?: unknown): number {
     return undefined;
   };
 
+  const tryOutRoot = readNumber(extractFromRecord(out, 'days'));
+  if (tryOutRoot !== null) return tryOutRoot;
+
   const tryOutMeta = readNumber(extractFromRecord(extractFromRecord(out, 'meta'), 'days'));
   if (tryOutMeta !== null) return tryOutMeta;
 

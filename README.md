@@ -7,7 +7,8 @@ OR-Tools (CP-SAT) を使ったシフト作成の最適化コア（v3）。
 Codespaces / ローカルのどちらでも、リポジトリ直下で次を実行すると Vite の開発サーバーが立ち上がります。
 
 ```bash
-bash run_all.sh
+bash run_all.sh            # 既定 input.json を使用
+bash run_all.sh data.json  # 任意の入力ファイルを指定
 ```
 
 Windows PowerShell:
@@ -17,6 +18,8 @@ Windows PowerShell:
 ```
 
 起動が完了するとポート 5173 で Viewer / Config / WishOffs を切り替えられます。
+コマンド実行時には solver が `input.json` を読み込み、`[input] path=...` や `[input] days=31 weekdayOfDay1=1` といったログを出力した後、`frontend/public/output.json` に結果を配置します。
+リポジトリ直下の既定 `input.json` は 2025 年 12 月（31 日、weekdayOfDay1=1）のサンプルです。別の月を使いたい場合はファイルを置き換えるか、スクリプト引数でパスを指定してください。
 
 ## Quick Start (manual)
 開発コマンドを直接使う場合は下記の順序でセットアップしてください。
@@ -41,7 +44,7 @@ npm run preview -- --port 5173
 Vite の開発サーバーには `/api/solve` と `/api/export-xlsx` のエンドポイントが組み込まれています。Config / Viewer から solver 実行を指示すると、次の順序で処理されます。
 
 1. solver 入力を `solver/input.json` として保存
-2. `python solver/solver.py --in solver/input.json --out solver/output.json --time_limit 60` をサブプロセスで実行
+2. `python solver/solver.py --input solver/input.json --output solver/output.json --time_limit 60` をサブプロセスで実行
 3. `solver/output.json` を読み込み、標準出力ログを diagnostics.logOutput に格納
 4. 成功時は「solver 実行完了：output.json を表示中」のトーストを表示、失敗時は stderr 先頭 20 行程度をエラーメッセージとして UI に返却
 
@@ -93,7 +96,7 @@ npm run dev -- --host 0.0.0.0 --strictPort --port 5173
 solver を単体で実行する場合は次のように呼び出せます。
 
 ```bash
-python solver/solver.py --in solver/sample_input_real.json --out solver/output.json --time_limit 60
+python solver/solver.py --input solver/sample_input_real.json --output solver/output.json --time_limit 60
 ```
 
 生成された `solver/output.json` は Viewer から読み込めます。
