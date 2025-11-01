@@ -7,6 +7,8 @@ import { requestSolve, SolveError, isSolveAvailable } from '../lib/solveClient';
 import { requestScheduleXlsx } from '../lib/exportClient';
 import { evaluateSolverOutputStatus } from '../lib/solverStatus';
 import { AppHeader } from '../components/AppHeader';
+import { useTargetMonth } from '../state/MonthContext';
+import { resolveDays, buildDayArray } from '../viewer/lib/days';
 
 type ShiftCode = string;
 
@@ -85,6 +87,13 @@ type AssignmentEntry = {
   shift?: string;
 };
 
+type ScheduleMeta = {
+  year?: number;
+  month?: number;
+  days?: number;
+  [key: string]: unknown;
+};
+
 type ScheduleData = {
   peopleOrder: string[];
   matrix: MatrixEntry[];
@@ -94,6 +103,9 @@ type ScheduleData = {
   assignments?: AssignmentEntry[];
   infeasible?: boolean;
   reason?: string | null;
+  meta?: ScheduleMeta;
+  inputEcho?: Record<string, unknown> | null;
+  dayTypeByDate?: unknown[];
 };
 
 type SampleOption = {
@@ -309,6 +321,28 @@ export default function ViewerPage() {
   const [inputAnalysis, setInputAnalysis] = useState<InputDetection | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const solverEnabled = isSolveAvailable;
+  const { targetMonth } = useTargetMonth();
+
+  const fallbackInput = useMemo(
+    () => ({ year: targetMonth.year, month: targetMonth.month }),
+    [targetMonth.year, targetMonth.month],
+  );
+
+  const scheduleInputEcho = useMemo(() => {
+    if (!schedule || !schedule.inputEcho) {
+      return null;
+    }
+    return typeof schedule.inputEcho === 'object' && !Array.isArray(schedule.inputEcho)
+      ? (schedule.inputEcho as Record<string, unknown>)
+      : null;
+  }, [schedule]);
+
+  const viewerInput = scheduleInputEcho ?? pendingInput ?? fallbackInput;
+  const resolvedDays = useMemo(
+    () => resolveDays(schedule ?? undefined, viewerInput ?? undefined),
+    [schedule, viewerInput],
+  );
+  const daysArray = useMemo(() => buildDayArray(resolvedDays), [resolvedDays]);
 
   const solverErrorInfo = schedule?.error;
   const solverErrorMessage =
@@ -336,6 +370,85 @@ export default function ViewerPage() {
     }
     return messages;
   }, [demandDiagnostics, solverErrorMessage]);
+
+  const demandPerDayRows = useMemo(
+    () => {
+      if (
+        !demandDiagnostics ||
+        !Array.isArray(demandDiagnostics.perDayTotals) ||
+        demandDiagnostics.perDayTotals.length === 0 ||
+        daysArray.length === 0
+      ) {
+        return [] as {
+          key: string;
+          displayDay: number | string;
+          total: number;
+          slots: Record<string, number>;
+          carryApplied: boolean;
+        }[];
+      }
+
+      const validEntries = demandDiagnostics.perDayTotals.filter(
+        (entry): entry is DemandDiagnosticsDay => entry !== null && typeof entry === 'object',
+      );
+      if (validEntries.length === 0) {
+        return [] as {
+          key: string;
+          displayDay: number | string;
+          total: number;
+          slots: Record<string, number>;
+          carryApplied: boolean;
+        }[];
+      }
+
+      const byDay = new Map<number, DemandDiagnosticsDay>();
+      validEntries.forEach((entry) => {
+        const dateValue = entry.date;
+        if (typeof dateValue === 'number' && Number.isFinite(dateValue)) {
+          byDay.set(Math.trunc(dateValue), entry);
+        }
+      });
+
+      return daysArray.map((day, index) => {
+        const fromMap = byDay.get(day);
+        const fallbackEntry = validEntries[index];
+        const entry = fromMap ?? fallbackEntry ?? { date: day };
+        const slotsSource =
+          entry && typeof entry === 'object' && entry.slots && typeof entry.slots === 'object'
+            ? (entry.slots as Record<string, unknown>)
+            : {};
+        const slots: Record<string, number> = {};
+        for (const slot of DEMAND_SLOTS) {
+          const rawValue = slotsSource[slot];
+          slots[slot] = typeof rawValue === 'number' && Number.isFinite(rawValue)
+            ? Math.trunc(rawValue)
+            : 0;
+        }
+        const total =
+          typeof entry.total === 'number' && Number.isFinite(entry.total)
+            ? Math.trunc(entry.total)
+            : Object.values(slots).reduce((sum, value) => sum + value, 0);
+        const carryApplied = Boolean(entry.carryApplied);
+        const displayDay =
+          typeof entry.date === 'number' || typeof entry.date === 'string'
+            ? entry.date
+            : day;
+        return {
+          key: `demand-${day}-${index}`,
+          displayDay,
+          total,
+          slots,
+          carryApplied,
+        };
+      });
+    },
+    [demandDiagnostics, daysArray],
+  );
+
+  const demandDaysValue =
+    typeof demandDiagnostics?.days === 'number' && Number.isFinite(demandDiagnostics.days)
+      ? Math.trunc(demandDiagnostics.days)
+      : resolvedDays;
 
   const scheduleStatus = useMemo(() => evaluateSolverOutputStatus(schedule), [schedule]);
   const suppressSchedule = scheduleStatus.hideSchedule;
@@ -367,31 +480,90 @@ export default function ViewerPage() {
     return unique;
   }, [solverDiagnostics, inconsistentSummaryFlag]);
 
+  const dayMismatchWarnings = useMemo(() => {
+    if (!schedule) {
+      return [] as string[];
+    }
+
+    const entries: { label: string; value: number }[] = [];
+    const addValue = (label: string, value: unknown) => {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        entries.push({ label, value: Math.trunc(value) });
+      }
+    };
+    const addLength = (label: string, value: unknown) => {
+      if (Array.isArray(value)) {
+        entries.push({ label, value: value.length });
+      }
+    };
+
+    addValue('output.meta.days', schedule.meta?.days);
+    addLength('output.dayTypeByDate.length', schedule.dayTypeByDate);
+    addValue('output.diagnostics.demand.days', demandDiagnostics?.days);
+    if (Array.isArray(demandDiagnostics?.perDayTotals)) {
+      entries.push({
+        label: 'output.diagnostics.demand.perDayTotals.length',
+        value: demandDiagnostics.perDayTotals.length,
+      });
+    }
+
+    if (viewerInput) {
+      const inputDays = (viewerInput as { days?: unknown }).days;
+      addValue('input.days', inputDays);
+      const inputDayTypes = (viewerInput as { dayTypeByDate?: unknown }).dayTypeByDate;
+      addLength('input.dayTypeByDate.length', inputDayTypes);
+    }
+
+    const uniqueValues = Array.from(new Set(entries.map((entry) => entry.value)));
+    if (uniqueValues.length <= 1) {
+      return [] as string[];
+    }
+
+    const detail = entries.map((entry) => `${entry.label}=${entry.value}`).join(' / ');
+    return [`日数情報が一致しません: ${detail}`];
+  }, [schedule, demandDiagnostics, viewerInput]);
+
   const warningMessages = useMemo(() => {
-    const combined = [...demandWarnings, ...solverWarnings];
+    const combined = [...demandWarnings, ...solverWarnings, ...dayMismatchWarnings];
     return Array.from(new Set(combined));
-  }, [demandWarnings, solverWarnings]);
+  }, [demandWarnings, solverWarnings, dayMismatchWarnings]);
 
   const availabilityTable = useMemo(() => {
     const availability = solverDiagnostics?.availability;
-    if (!availability || typeof availability !== 'object') {
+    if (!availability || typeof availability !== 'object' || daysArray.length === 0) {
       return [] as { day: number; slots: Record<string, number>; total: number }[];
     }
-    const entries: { day: number; slots: Record<string, number>; total: number }[] = [];
+
+    const normalized = new Map<number, { slots: Record<string, number>; total: number }>();
     for (const [dayKey, rawSlots] of Object.entries(availability)) {
       if (!rawSlots || typeof rawSlots !== 'object') continue;
-      const day = Number(dayKey);
-      if (!Number.isFinite(day)) continue;
-      const normalized: Record<string, number> = {};
+      const dayNumber = Number(dayKey);
+      if (!Number.isFinite(dayNumber)) continue;
+      const slots: Record<string, number> = {};
       for (const slot of DEMAND_SLOTS) {
         const value = (rawSlots as Record<string, unknown>)[slot];
-        normalized[slot] = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+        slots[slot] = typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : 0;
       }
-      const total = Object.values(normalized).reduce((sum, value) => sum + value, 0);
-      entries.push({ day, slots: normalized, total });
+      const total = Object.values(slots).reduce((sum, value) => sum + value, 0);
+      normalized.set(Math.trunc(dayNumber), { slots, total });
     }
-    return entries.sort((a, b) => a.day - b.day);
-  }, [solverDiagnostics]);
+
+    if (normalized.size === 0) {
+      return [] as { day: number; slots: Record<string, number>; total: number }[];
+    }
+
+    return daysArray.map((day) => {
+      const existing = normalized.get(day);
+      if (existing) {
+        return { day, slots: existing.slots, total: existing.total };
+      }
+      const emptySlots = DEMAND_SLOTS.reduce((acc, slot) => {
+        acc[slot] = 0;
+        return acc;
+      }, {} as Record<string, number>);
+      return { day, slots: emptySlots, total: 0 };
+    });
+  }, [solverDiagnostics, daysArray]);
 
   const availabilityWarnings = useMemo(() => {
     if (!solverDiagnostics || !Array.isArray(solverDiagnostics.availabilityWarnings)) {
@@ -717,22 +889,35 @@ export default function ViewerPage() {
   const scheduleView = useMemo(() => {
     if (!schedule || suppressSchedule) return null;
 
-    const matrix = Array.isArray(schedule.matrix) ? schedule.matrix : [];
-    const dates = matrix.map((entry, index) => {
-      const label = formatDate(entry.date);
-      return {
-        label,
-        key: `${label}-${index}`,
-      };
+    const matrix: MatrixEntry[] = Array.isArray(schedule.matrix) ? schedule.matrix : [];
+    const people: string[] = Array.isArray(schedule.peopleOrder) ? schedule.peopleOrder : [];
+
+    const entries = daysArray.map((day, index) => {
+      const source = matrix[index];
+      const rawDate = (source?.date ?? day) as MatrixEntry['date'];
+      const label = formatDate(rawDate);
+      const shifts: Record<string, string> = source?.shifts ?? {};
+      return { day, label, shifts };
     });
 
-    const rows = schedule.peopleOrder.map((person) => ({
+    const dates = entries.map(({ day, label }) => ({ key: `day-${day}`, label }));
+
+    const rows = people.map((person) => ({
       person,
-      shifts: matrix.map((entry) => entry.shifts[person] ?? ''),
+      shifts: entries.map(({ shifts }) => {
+        const raw = shifts[person];
+        if (typeof raw === 'string') {
+          return raw;
+        }
+        if (raw === null || raw === undefined) {
+          return '';
+        }
+        return String(raw);
+      }),
     }));
 
     return { dates, rows };
-  }, [schedule, suppressSchedule]);
+  }, [schedule, suppressSchedule, daysArray]);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -912,7 +1097,7 @@ export default function ViewerPage() {
             <dl className="grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
               <div className="flex items-center justify-between gap-3 rounded-md bg-slate-100 px-3 py-2">
                 <dt className="font-medium text-slate-600">days</dt>
-                <dd>{demandDiagnostics.days ?? '—'}</dd>
+                <dd>{demandDaysValue}</dd>
               </div>
               <div className="flex items-center justify-between gap-3 rounded-md bg-slate-100 px-3 py-2">
                 <dt className="font-medium text-slate-600">weekdayOfDay1</dt>
@@ -929,7 +1114,7 @@ export default function ViewerPage() {
                 </div>
               )}
             </dl>
-            {Array.isArray(demandDiagnostics.perDayTotals) && demandDiagnostics.perDayTotals.length > 0 && (
+            {demandPerDayRows.length > 0 && (
               <div className="overflow-x-auto">
                 <table className="min-w-full border-collapse text-left text-sm">
                   <thead className="bg-slate-100">
@@ -955,18 +1140,18 @@ export default function ViewerPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {demandDiagnostics.perDayTotals.map((entry) => {
-                      const slots = entry.slots ?? {};
+                    {demandPerDayRows.map((row) => {
+                      const slots = row.slots;
                       return (
-                        <tr key={`diag-day-${entry.date ?? 'unknown'}`} className="odd:bg-white even:bg-slate-50">
-                          <td className="border border-slate-200 px-3 py-2">{entry.date ?? '—'}</td>
-                          <td className="border border-slate-200 px-3 py-2">{entry.total ?? 0}</td>
+                        <tr key={`diag-day-${row.key}`} className="odd:bg-white even:bg-slate-50">
+                          <td className="border border-slate-200 px-3 py-2">{row.displayDay ?? '—'}</td>
+                          <td className="border border-slate-200 px-3 py-2">{row.total}</td>
                           {DEMAND_SLOTS.map((slot) => (
-                            <td key={`diag-day-${entry.date}-${slot}`} className="border border-slate-200 px-3 py-2">
+                            <td key={`diag-day-${row.key}-${slot}`} className="border border-slate-200 px-3 py-2">
                               {slots[slot] ?? 0}
                             </td>
                           ))}
-                          <td className="border border-slate-200 px-3 py-2">{entry.carryApplied ? 'あり' : 'なし'}</td>
+                          <td className="border border-slate-200 px-3 py-2">{row.carryApplied ? 'あり' : 'なし'}</td>
                         </tr>
                       );
                     })}
