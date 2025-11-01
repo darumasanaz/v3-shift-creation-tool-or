@@ -468,7 +468,8 @@ export default function ViewerPage() {
         timestamp = new Date().toLocaleTimeString('ja-JP', { hour12: false });
       }
 
-      setAutoMessage(`Configからの実行結果を表示しています（最終更新: ${timestamp}）`);
+      setAutoMessage('solver 実行完了：output.json を表示中');
+      setNotice(`最終更新: ${timestamp}`);
     } catch (storageError) {
       console.error('failed to load last output from storage', storageError);
     }
@@ -530,12 +531,12 @@ export default function ViewerPage() {
       }
       setSchedule(solved as ScheduleData);
       setError(null);
-      const completionMessage = `${buildInputSummary(analysis)} solverの実行が完了しました。`;
-      setNotice(
+      const baseMessage = 'solver 実行完了：output.json を表示中';
+      const noticeMessage =
         statusInfo.message && statusInfo.hideSchedule
-          ? `${completionMessage} ${statusInfo.message}`
-          : completionMessage,
-      );
+          ? `${baseMessage}\n${statusInfo.message}`
+          : baseMessage;
+      setNotice(noticeMessage);
       setAutoMessage(null);
     } catch (solverError) {
       if (solverError instanceof SolveError) {
@@ -834,7 +835,7 @@ export default function ViewerPage() {
 
         {notice && (
           <div
-            className="rounded-md border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800"
+            className="rounded-md border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800 whitespace-pre-line"
             role="status"
           >
             {notice}

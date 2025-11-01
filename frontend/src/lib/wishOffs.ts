@@ -1,6 +1,7 @@
+import { WISH_OFFS_STORAGE_KEY } from './storageKeys';
 import { WishOffs } from '../types/config';
 
-export const WISH_OFFS_STORAGE_KEY = 'shift-wishoffs-2025-12';
+export { WISH_OFFS_STORAGE_KEY } from './storageKeys';
 
 const isValidDay = (value: number): boolean => Number.isInteger(value) && value >= 1 && value <= 31;
 

@@ -1,71 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ---- Settings (overridable) ----
-PORT="${PORT:-5173}"
-TIME_LIMIT="${TIME_LIMIT:-60}"
-API_PORT="${API_PORT:-8001}"
-PY="${PY:-python3}"
-
-# ---- Helpers ----
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$here"
-
-server_pid=""
-cleanup() {
-  if [[ -n "${server_pid}" ]]; then
-    echo "\n🛑 Stopping solver API..."
-    kill "${server_pid}" >/dev/null 2>&1 || true
-  fi
-}
-trap cleanup EXIT
-
-echo "\U0001F527 Checking Python venv..."
-if [[ ! -d .venv ]]; then
-  ("${PY}" -m venv .venv) || (python -m venv .venv)
-fi
-# shellcheck disable=SC1091
-source .venv/bin/activate
-
-echo "\U0001F4E6 Installing solver deps (if needed)..."
-pip install --quiet --upgrade pip >/dev/null
-pip install --quiet -r solver/requirements.txt >/dev/null || true
-echo "\U0001F9EA Installing server deps (if needed)..."
-pip install --quiet -r server/requirements.txt >/dev/null || true
-
-export SOLVER_TIME_LIMIT="${TIME_LIMIT}"
-export API_PORT
-
-echo "\U0001F680 Starting solver API on port ${API_PORT}..."
-PYTHONPATH="${here}" "${PY}" server/app.py >/tmp/solver-api.log 2>&1 &
-server_pid=$!
-sleep 1
-
-echo "\U0001F9E0 Running solver (time_limit=${TIME_LIMIT})..."
-"${PY}" solver/solver.py \
-  --in solver/sample_input_real.json \
-  --out solver/output.json \
-  --time_limit "${TIME_LIMIT}"
-echo "✅ Solver finished → solver/output.json"
-
-echo "\U0001F4E6 Preparing frontend deps..."
-pushd frontend >/dev/null
-# prefer lockfile if exists
-if command -v npm >/dev/null 2>&1; then
-  if [[ -f package-lock.json ]]; then
-    npm ci >/dev/null 2>&1 || npm install >/dev/null 2>&1
-  else
-    npm install >/dev/null 2>&1
-  fi
+# 1) Python venv の有効化（既存の .venv を優先。無ければ作成）
+if [ -d ".venv" ]; then
+  source .venv/bin/activate
 else
-  echo "❌ npm not found"; exit 1
+  python3 -m venv .venv
+  source .venv/bin/activate
 fi
 
-mkdir -p public
-cp -f ../solver/output.json public/output.json
-echo "✅ Copied to frontend/public/output.json"
+# 2) solver 依存
+pip install -r solver/requirements.txt
 
-echo "\U0001F310 Starting dev server on port ${PORT}..."
-echo "   (If in Codespaces, open forwarded port ${PORT})"
-npm run dev -- --host 0.0.0.0 --strictPort --port "${PORT}"
-popd >/dev/null
+# 3) frontend 依存
+cd frontend
+# CI 環境など registry 制限がある場合は npm ci にフォールバック
+if npm ci >/dev/null 2>&1; then
+  echo "npm ci ok"
+else
+  npm install
+fi
+
+# 4) Vite dev を起動（0.0.0.0 固定、5173固定）
+echo "--------------------------------------"
+echo "Vite dev server starting on port 5173…"
+echo "--------------------------------------"
+npm run dev -- --host 0.0.0.0 --strictPort --port 5173
