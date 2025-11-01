@@ -7,7 +7,7 @@
     "copy:out": "mkdir -p public && cp -f ../solver/output.json ./public/output.json",
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview --port 5173"
   },
   "dependencies": {
     "react": "^18.2.0",
